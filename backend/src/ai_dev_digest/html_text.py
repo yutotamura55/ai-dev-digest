@@ -7,7 +7,7 @@ import logging
 import re
 from datetime import UTC, datetime
 from html.parser import HTMLParser
-from typing import Any
+from typing import Any, NamedTuple
 
 logger = logging.getLogger(__name__)
 
@@ -215,44 +215,63 @@ class _MetadataCollector(HTMLParser):
             self.json_ld.append(data)
 
 
-def _find_date_published(value: Any) -> str | None:
-    """JSON-LD の中 (入れ子や @graph の配列を含む) から datePublished を探す。"""
+# JSON-LD を探す深さの上限。schema.org のデータは数段の入れ子で足りる。
+MAX_JSON_DEPTH = 20
+
+
+class PageDate(NamedTuple):
+    """ページから読んだ公開日時。date_only は、元の値に時刻がなく 0:00 UTC にしたことを表す。"""
+
+    moment: datetime
+    date_only: bool
+
+
+def _find_date_published(value: Any, depth: int = 0) -> str | None:
+    """JSON-LD の中 (入れ子や @graph の配列を含む) から datePublished を探す。
+
+    深すぎる入れ子は見ない。
+    """
+    if depth > MAX_JSON_DEPTH:
+        return None
     if isinstance(value, dict):
         published = value.get("datePublished")
         if isinstance(published, str) and published:
             return published
-        for child in value.values():
-            found = _find_date_published(child)
-            if found:
-                return found
+        children: list[Any] = list(value.values())
     elif isinstance(value, list):
-        for child in value:
-            found = _find_date_published(child)
-            if found:
-                return found
+        children = value
+    else:
+        return None
+    for child in children:
+        found = _find_date_published(child, depth + 1)
+        if found:
+            return found
     return None
 
 
-def _parse_datetime(value: str) -> datetime | None:
+def _parse_datetime(value: str) -> PageDate | None:
     """ISO 8601 の日時か日付を UTC の datetime にする。
 
-    日付だけなら 0 時、時差がなければ UTC とみなす。
+    日付だけなら 0 時にして date_only を True にする。時差がなければ UTC とみなす。
     """
+    text = value.strip()
     try:
-        parsed = datetime.fromisoformat(value.strip())
+        parsed = datetime.fromisoformat(text)
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=UTC)
-        return parsed.astimezone(UTC)
+        moment = parsed.astimezone(UTC)
     except ValueError, OverflowError:
         # 形が違うか、"0001-01-01T00:00:00+09:00" のように UTC に直せない日付。
         return None
+    return PageDate(moment, date_only=len(text) == len("2026-11-03"))
 
 
-def published_at_from_html(html: str) -> datetime | None:
+def published_at_from_html(html: str) -> PageDate | None:
     """ページの構造化データから公開日時を読む。
 
     JSON-LD (schema.org) の datePublished を先に、なければ article:published_time などの
-    meta を見る。どちらもなければ None。
+    meta を見る。どちらもなければ None。外部のページなので、壊れた JSON や深すぎる入れ子は
+    日付なしとして扱う。
     """
     collector = _MetadataCollector()
     collector.feed(html)
@@ -261,7 +280,7 @@ def published_at_from_html(html: str) -> datetime | None:
     for raw in collector.json_ld:
         try:
             found = _find_date_published(json.loads(raw))
-        except ValueError:
+        except ValueError, RecursionError:
             continue
         if found:
             candidates.append(found)

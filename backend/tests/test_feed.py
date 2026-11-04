@@ -226,7 +226,7 @@ def test_page_date_reads_the_structured_data_of_a_fetched_page() -> None:
     with client_returning(httpx.Response(200, content=html)) as client:
         page = fetch_page(client, "https://example.com/post")
 
-    assert page_date(page) == datetime(2026, 11, 3, tzinfo=UTC)
+    assert page_date(page) == (datetime(2026, 11, 3, tzinfo=UTC), True)
     assert str(page[1]) == "https://example.com/post"
 
 

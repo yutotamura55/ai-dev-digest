@@ -9,6 +9,7 @@ import httpx
 import pytest
 
 from ai_dev_digest import job
+from ai_dev_digest.feed import FeedError
 from ai_dev_digest.models import Article
 from ai_dev_digest.sources import Source
 from tests.conftest import (
@@ -140,6 +141,49 @@ def test_run_skips_a_dateless_entry_whose_page_cannot_be_fetched(
     assert summarizer.judged == []
     assert requested.count("https://dateless.example/gone") == 1
     assert "could not read the publication date" in caplog.text
+
+
+def test_run_does_not_add_the_date_only_tolerance_to_an_explicit_midnight() -> None:
+    # 11-02 00:00 UTC と時刻つきで書かれた記事は、NOW (11-04 01:00) の 49 時間前なので含めない。
+    feed = rss([item("Model midnight", "https://dateless.example/midnight", None)])
+    page = b'<script type="application/ld+json">{"datePublished": "2026-11-02T00:00:00Z"}</script>'
+    client, _ = routing_client({DATELESS.feed_url: feed, "https://dateless.example/midnight": page})
+    store = FakeArticleStore()
+
+    assert job.run(client, store, FakeSummarizer(), [DATELESS], now=NOW).candidates == 0
+
+
+def test_run_fetches_a_page_once_for_entries_that_differ_only_by_fragment() -> None:
+    feed = rss(
+        [
+            item("Model Nov 3", "https://notes.example/overview#nov-3", RECENT),
+            item("Model Nov 2", "https://notes.example/overview#nov-2", RECENT),
+        ]
+    )
+    page = (
+        b'<main><h3 id="nov-3">Nov 3</h3><p>today</p>'
+        b'<h3 id="nov-2">Nov 2</h3><p>yesterday</p></main>'
+    )
+    notes = Source("Notes", "https://notes.example/rss.xml")
+    client, requested = routing_client(
+        {notes.feed_url: feed, "https://notes.example/overview": page}
+    )
+    summarizer = FakeSummarizer()
+
+    job.run(client, FakeArticleStore(), summarizer, [notes], now=NOW)
+
+    assert requested.count("https://notes.example/overview") == 1
+    assert sorted(body for _, body in summarizer.summarized) == [
+        "Nov 2\nyesterday",
+        "Nov 3\ntoday",
+    ]
+
+
+def test_page_cache_rejects_a_malformed_url_without_requesting() -> None:
+    client, requested = routing_client({})
+    with pytest.raises(FeedError, match="invalid URL"):
+        job.PageCache(client).get("https://example.com:bad/post")
+    assert requested == []
 
 
 def test_run_does_not_request_a_failed_page_twice() -> None:

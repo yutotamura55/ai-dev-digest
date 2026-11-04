@@ -24,6 +24,7 @@ from ai_dev_digest.feed import (
     page_text,
     parse_feed,
 )
+from ai_dev_digest.html_text import PageDate
 from ai_dev_digest.llm import (
     DEFAULT_MODEL,
     SUMMARY_INPUT_CHARS,
@@ -41,10 +42,10 @@ DEFAULT_LIMIT = 10
 # 新着とみなす公開日時の範囲。実行の間隔 (1 日) より長くし、実行の遅れや失敗で記事を取りこぼさない
 # ようにする。保存済みの記事は選別の前に除くので、重なった分を 2 回保存することはない。
 DEFAULT_WINDOW = timedelta(hours=48)
-# 公開日時を記事ページから補う発信元で、1 回の実行に読むページの上限。フィードは新しい順なので、
-# これを超える古い項目は飛ばす。
+# 公開日時を記事ページから補う発信元で、1 回の実行に発信元ごとに読むページの上限。
+# フィードは新しい順なので、これを超える古い項目は飛ばす。
 MAX_DATE_LOOKUPS = 20
-# ページから読んだ公開日が日付だけ (時刻が 0:00 UTC) のとき、その日のどの時刻の公開でも
+# ページから読んだ公開日が日付だけ (0:00 UTC にしたもの) のとき、その日のどの時刻の公開でも
 # 新着に含めるための余裕。
 DATE_ONLY_TOLERANCE = timedelta(days=1)
 
@@ -61,16 +62,29 @@ class PageCache:
         self._pages: dict[str, tuple[str, httpx.URL] | FeedError] = {}
 
     def get(self, url: str) -> tuple[str, httpx.URL]:
-        """ページの HTML と最終的な URL。取得できなければ FeedError。"""
-        if url not in self._pages:
+        """ページの HTML と、その記事の節を指す最終的な URL。取得できなければ FeedError。
+
+        フラグメントだけが違う URL (`overview#nov-3` と `overview#nov-2`) は同じページなので、
+        フラグメントを除いた URL で 1 回だけ取得する。返す URL には、リダイレクト先が
+        フラグメントを指定していなければ、引数のフラグメントを付け直す。
+        """
+        try:
+            requested = httpx.URL(url)
+        except httpx.InvalidURL as error:
+            raise FeedError(f"invalid URL: {url}") from error
+        key = str(requested.copy_with(fragment=None))
+        if key not in self._pages:
             try:
-                self._pages[url] = fetch_page(self._client, url)
+                self._pages[key] = fetch_page(self._client, key)
             except FeedError as error:
-                self._pages[url] = error
-        page = self._pages[url]
+                self._pages[key] = error
+        page = self._pages[key]
         if isinstance(page, FeedError):
             raise page
-        return page
+        html, final_url = page
+        if not final_url.fragment and requested.fragment:
+            final_url = final_url.copy_with(fragment=requested.fragment)
+        return html, final_url
 
 
 @dataclass
@@ -112,18 +126,13 @@ def collect_entries(
         fresh = 0
         for entry in _with_dates(pages, store, source, items):
             # 発信元の時計のずれを見込み、少し先の公開日時も新着に含める。日付だけの公開日は
-            # 0:00 UTC なので、その日のうちの公開なら窓に入るよう 1 日の余裕を足す。
-            tolerance = DATE_ONLY_TOLERANCE if _is_date_only(entry.published_at) else timedelta()
+            # 0:00 UTC にしてあるので、その日のうちの公開なら窓に入るよう 1 日の余裕を足す。
+            tolerance = DATE_ONLY_TOLERANCE if entry.date_only else timedelta()
             if since - tolerance <= entry.published_at <= now + timedelta(hours=1):
                 fresh += 1
                 entries.setdefault(entry.url, entry)
         logger.info("%s: %d entries, %d new", source.name, len(items), fresh)
     return list(entries.values()), failed
-
-
-def _is_date_only(moment: datetime) -> bool:
-    """時刻が 0:00:00 UTC か。ページの構造化データの日付だけの値はこの形になる (html_text)。"""
-    return moment.astimezone(UTC).time() == datetime.min.time()
 
 
 def _with_dates(
@@ -138,18 +147,25 @@ def _with_dates(
     capped = 0
     for item in items:
         published_at = item.published_at
+        date_only = item.date_only
         if published_at is None and source.date_from_page and item.id not in known:
             if lookups >= MAX_DATE_LOOKUPS:
                 capped += 1
                 continue
             lookups += 1
-            published_at = _page_date(pages, item.url)
+            found = _page_date(pages, item.url)
+            if found is not None:
+                published_at, date_only = found.moment, found.date_only
         if published_at is None:
             if item.id not in known:
                 unresolved += 1
             continue
         entries.append(
-            FeedEntry(**item.model_dump(exclude={"published_at"}), published_at=published_at)
+            FeedEntry(
+                **item.model_dump(exclude={"published_at", "date_only"}),
+                published_at=published_at,
+                date_only=date_only,
+            )
         )
     if capped:
         logger.info(
@@ -160,7 +176,7 @@ def _with_dates(
     return entries
 
 
-def _page_date(pages: PageCache, url: str) -> datetime | None:
+def _page_date(pages: PageCache, url: str) -> PageDate | None:
     """記事ページの公開日時。取得できないか、日付がなければ None。"""
     try:
         return page_date(pages.get(url))

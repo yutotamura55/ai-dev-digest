@@ -32,6 +32,8 @@ class FeedItem(BaseModel):
     published_at: datetime | None
     # フィードに含まれる本文か概要。HTML のタグは除いてある。
     content: str = ""
+    # published_at が日付だけの値 (0:00 UTC にしたもの) か。新着の判定で 1 日の余裕を足す。
+    date_only: bool = False
 
     @property
     def id(self) -> str:

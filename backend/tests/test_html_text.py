@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 
-from ai_dev_digest.html_text import html_to_text, published_at_from_html
+from ai_dev_digest.html_text import PageDate, html_to_text, published_at_from_html
 
 
 def test_uses_only_the_article_when_the_page_has_one() -> None:
@@ -176,21 +176,25 @@ def test_published_at_from_json_ld_date_only_is_midnight_utc() -> None:
         + "</head></html>"
     )
 
-    assert published_at_from_html(html) == datetime(2026, 11, 3, tzinfo=UTC)
+    assert published_at_from_html(html) == PageDate(datetime(2026, 11, 3, tzinfo=UTC), True)
 
 
 def test_published_at_from_json_ld_with_time_zone_is_converted_to_utc() -> None:
     html = ld('{"datePublished": "2026-11-03T09:30:00+09:00"}')
 
-    assert published_at_from_html(html) == datetime(2026, 11, 3, 0, 30, tzinfo=UTC)
-    assert published_at_from_html(ld('{"datePublished": "2026-11-03T00:30:00Z"}')) == datetime(
-        2026, 11, 3, 0, 30, tzinfo=UTC
+    assert published_at_from_html(html) == PageDate(datetime(2026, 11, 3, 0, 30, tzinfo=UTC), False)
+    assert published_at_from_html(ld('{"datePublished": "2026-11-03T00:30:00Z"}')) == PageDate(
+        datetime(2026, 11, 3, 0, 30, tzinfo=UTC), False
+    )
+    # 時刻つきの 0:00 は日付だけとは区別する。
+    assert published_at_from_html(ld('{"datePublished": "2026-11-03T00:00:00Z"}')) == PageDate(
+        datetime(2026, 11, 3, tzinfo=UTC), False
     )
 
 
 def test_published_at_assumes_utc_for_a_naive_datetime() -> None:
-    assert published_at_from_html(ld('{"datePublished": "2026-11-03T01:00:00"}')) == datetime(
-        2026, 11, 3, 1, 0, tzinfo=timezone(timedelta(0))
+    assert published_at_from_html(ld('{"datePublished": "2026-11-03T01:00:00"}')) == PageDate(
+        datetime(2026, 11, 3, 1, 0, tzinfo=timezone(timedelta(0))), False
     )
 
 
@@ -204,7 +208,18 @@ def test_published_at_searches_nested_graph_and_skips_other_scripts() -> None:
         )
     )
 
-    assert published_at_from_html(html) == datetime(2026, 10, 30, tzinfo=UTC)
+    assert published_at_from_html(html) == PageDate(datetime(2026, 10, 30, tzinfo=UTC), True)
+
+
+def test_published_at_ignores_json_nested_too_deeply() -> None:
+    deep = ld("[" * 100_000 + "]" * 100_000)
+    nested = ld('{"a": ' * 30 + '{"datePublished": "2026-11-03"}' + "}" * 30)
+    fallback = '<meta property="article:published_time" content="2026-11-01">'
+
+    assert published_at_from_html(deep + fallback) == PageDate(
+        datetime(2026, 11, 1, tzinfo=UTC), True
+    )
+    assert published_at_from_html(nested) is None
 
 
 def test_published_at_falls_back_to_meta_tags() -> None:
@@ -213,16 +228,18 @@ def test_published_at_falls_back_to_meta_tags() -> None:
         '<meta name="published_time" content="2026-11-01">'
     )
 
-    assert published_at_from_html(html) == datetime(2026, 11, 2, 17, 45, tzinfo=UTC)
+    assert published_at_from_html(html) == PageDate(
+        datetime(2026, 11, 2, 17, 45, tzinfo=UTC), False
+    )
 
 
 def test_published_at_accepts_a_mime_parameter_and_itemprop_meta() -> None:
     with_charset = (
         '<script type="application/ld+json; charset=utf-8">{"datePublished": "2026-11-03"}</script>'
     )
-    assert published_at_from_html(with_charset) == datetime(2026, 11, 3, tzinfo=UTC)
+    assert published_at_from_html(with_charset) == PageDate(datetime(2026, 11, 3, tzinfo=UTC), True)
     assert published_at_from_html('<meta itemprop="datePublished" content="2026-11-02">') == (
-        datetime(2026, 11, 2, tzinfo=UTC)
+        PageDate(datetime(2026, 11, 2, tzinfo=UTC), True)
     )
 
 

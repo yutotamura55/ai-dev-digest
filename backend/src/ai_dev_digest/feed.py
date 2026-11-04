@@ -12,7 +12,7 @@ from typing import Any
 import feedparser
 import httpx
 
-from ai_dev_digest.html_text import html_to_text, published_at_from_html
+from ai_dev_digest.html_text import PageDate, html_to_text, published_at_from_html
 from ai_dev_digest.models import FeedItem
 
 logger = logging.getLogger(__name__)
@@ -188,7 +188,7 @@ def parse_feed(body: bytes, source: str) -> list[FeedItem]:
     return items
 
 
-def page_date(page: tuple[str, httpx.URL]) -> datetime | None:
+def page_date(page: tuple[str, httpx.URL]) -> PageDate | None:
     """取得したページの構造化データから公開日時を読む。日付がなければ None。"""
     return published_at_from_html(page[0])
 
