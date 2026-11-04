@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0">
+<rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/">
   <channel>
     <title>Example AI News</title>
     <link>https://example.com/news</link>
@@ -8,18 +8,28 @@
       <title>Second model release</title>
       <link>https://example.com/news/second</link>
       <pubDate>Tue, 03 Nov 2026 09:00:00 GMT</pubDate>
+      <description><![CDATA[<p>Short summary.</p>]]></description>
+      <content:encoded><![CDATA[<p>The <b>second</b> model is faster.</p><script>alert(1)</script><p>Pricing stays the same.</p>]]></content:encoded>
     </item>
     <item>
       <title>First model release</title>
       <link>https://example.com/news/first</link>
+      <pubDate>Mon, 02 Nov 2026 09:00:00 GMT</pubDate>
+      <description>Plain text summary.</description>
+    </item>
+    <item>
+      <title>Undated post</title>
+      <link>https://example.com/news/undated</link>
     </item>
     <item>
       <title></title>
       <link>https://example.com/news/no-title</link>
+      <pubDate>Mon, 02 Nov 2026 09:00:00 GMT</pubDate>
     </item>
     <item>
       <title>Not a web link</title>
       <link>javascript:alert(1)</link>
+      <pubDate>Mon, 02 Nov 2026 09:00:00 GMT</pubDate>
     </item>
   </channel>
 </rss>

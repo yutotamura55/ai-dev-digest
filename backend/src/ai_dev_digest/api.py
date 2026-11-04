@@ -2,16 +2,25 @@
 
 from __future__ import annotations
 
+from datetime import UTC, date, datetime
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, Query
+from fastapi import Depends, FastAPI, HTTPException, Query
 from google.cloud import firestore
+from pydantic import BaseModel
 
-from ai_dev_digest.models import Article
+from ai_dev_digest.models import Article, date_jst
 from ai_dev_digest.store import ArticleStore, FirestoreArticleStore
 
 app = FastAPI(title="ai-dev-digest")
+
+
+class DayDigest(BaseModel):
+    """1 日分の記事。date は日本時間の日付 (YYYY-MM-DD)。"""
+
+    date: str
+    articles: list[Article]
 
 
 @lru_cache(maxsize=1)
@@ -27,9 +36,16 @@ def healthz() -> dict[str, str]:
 
 
 @app.get("/articles")
-def list_articles(
+def articles_of_day(
     store: Annotated[ArticleStore, Depends(get_store)],
-    limit: Annotated[int, Query(ge=1, le=100)] = 20,
-) -> list[Article]:
-    """収集した日時の新しい順に記事を返す。"""
-    return store.latest(limit)
+    day: Annotated[str | None, Query(alias="date", pattern=r"^\d{4}-\d{2}-\d{2}$")] = None,
+) -> DayDigest:
+    """指定した日本時間の日付 (省略すれば今日) に集めた記事を、スコアの高い順に返す。"""
+    if day is None:
+        day = date_jst(datetime.now(UTC))
+    else:
+        try:
+            date.fromisoformat(day)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=f"invalid date: {day}") from error
+    return DayDigest(date=day, articles=store.by_date(day))

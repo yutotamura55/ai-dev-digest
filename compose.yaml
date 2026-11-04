@@ -40,6 +40,7 @@ services:
       - "127.0.0.1:8000:8000"
 
   # 記事の収集を 1 回だけ動かす：docker compose run --rm job
+  # .env の ANTHROPIC_API_KEY が要る (.env.example)。
   # 保存先はいつもエミュレーター。FIRESTORE_EMULATOR_HOST は .env より優先される。
   job:
     <<: *dev

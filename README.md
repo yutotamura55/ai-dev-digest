@@ -1,16 +1,44 @@
 # ai-dev-digest
 
 生成 AI の開発に関する公式の発信（各社のブログ、リリースノートなど）を集め、日本語の要約を日付ごとに読めるようにするサイトです。
-いまは開発環境を用意した段階です。
-動くのは、1 つのフィードから記事を集めて保存し、画面に一覧で表示するところまでです。
-要約と複数の発信元への対応は [#2](https://github.com/yutotamura55/ai-dev-digest/issues/2)、GCP へのデプロイは [#3](https://github.com/yutotamura55/ai-dev-digest/issues/3) で作ります。
+ジョブが 1 日 1 回、発信元の RSS から過去 24 時間の新着を集め、LLM（Claude）でモデル・API・料金・廃止予定に関わる記事を選び、日本語の要約を付けて保存します。
+画面は、その日の記事をカードで並べ、カードを押すと詳細と原文へのリンクを表示します。
+GCP へのデプロイは [#3](https://github.com/yutotamura55/ai-dev-digest/issues/3) で作ります。
+
+## 集める発信元
+
+| 発信元 | フィード | 備考 |
+| --- | --- | --- |
+| OpenAI News | <https://openai.com/news/rss.xml> | 記事ページの取得はボットの判定で 403 になるため、フィードの概要だけで要約する |
+| OpenAI Developers | <https://developers.openai.com/rss.xml> | |
+| Claude Platform release notes | <https://platform.claude.com/docs/en/release-notes/feed.xml> | |
+| Google DeepMind | <https://deepmind.google/blog/rss.xml> | |
+| Google The Keyword（AI） | <https://blog.google/innovation-and-ai/technology/ai/rss/> | |
+| Google Developers Blog | <https://developers.googleblog.com/feeds/posts/default/> | フィードの項目に公開日時がなく、新着を判定できないため、いまは記事が集まらない |
+
+発信元の一覧は `backend/src/ai_dev_digest/sources.py` にあります。
+発信元ごとに、記事ページを取得して本文を補うかを切り替えられます（`fetch_body`）。
+Anthropic News には RSS がないため対象外です。
+
+## 1 日の流れ
+
+1. 各発信元のフィードを取得し、過去 24 時間に公開された項目を集める。URL が同じ項目は 1 つにし、保存済みの記事は除く。発信元が 1 つ失敗しても、ほかの発信元の処理は続ける。
+2. 候補をまとめて LLM に渡し、「モデル・API・料金・廃止予定のいずれかに関わるか」と 0〜100 のスコアを判定させる。
+3. 関わるとされた記事をスコアの高い順に最大 10 件（`MAX_ARTICLES_PER_DAY`）選ぶ。
+4. 記事ごとに、記事ページの本文（取得できなければフィードの概要）を LLM に渡し、2〜3 文の要約と箇条書きの詳細を日本語で生成する。
+5. 原文の URL、発信元、公開日時、収集日時（UTC）、収集日（日本時間）、スコアと一緒に Firestore の `articles` に保存する。記事の ID は URL から決まり、同じ記事は 1 件のまま。
+
+LLM の呼び出しは `backend/src/ai_dev_digest/llm.py` に閉じています。
+モデルは環境変数 `LLM_MODEL` で切り替えます。
+既定の `claude-sonnet-5-5` は入力 100 万トークンあたり 2 ドル、出力 10 ドルで、1 日 10 件なら月に数百円です（2026-11-04 に料金ページで確認）。
+`claude-haiku-5-5`（0.10 ドル / 0.50 ドル）にすると月に数十円になります。
 
 ## 構成
 
 | ディレクトリ | 中身 |
 | --- | --- |
-| `backend/` | Python 3.14。記事を集めるジョブ（`ai_dev_digest.job`）と、記事を返す API（FastAPI、`ai_dev_digest.api`）。依存は uv で管理する |
-| `frontend/` | Next.js 16 の画面。API から記事を読み、日本時間の日付ごとに並べる |
+| `backend/` | Python 3.14。記事を集めて要約するジョブ（`ai_dev_digest.job`）と、日付ごとの記事を返す API（FastAPI、`ai_dev_digest.api`）。依存は uv で管理する |
+| `frontend/` | Next.js 16 の画面。トップは今日の記事、`/days/YYYY-MM-DD` はその日の記事を表示する |
 | `tools/` | リポジトリ全体に使う検査の道具（Semgrep CE、zizmor、diff-cover）。アプリの依存とぶつからないよう分けている |
 | `scripts/check.sh` | CI と同じ検査をすべて実行するコマンド |
 
@@ -64,7 +92,8 @@ docker compose up api web
 ```
 
 別の端末で記事を集めます。
-`.env.example` を `.env` に写すと、OpenAI のニュースのフィードから最新の 1 件を集めます。
+`.env.example` を `.env` に写し、`ANTHROPIC_API_KEY` に Claude API のキーを書きます。
+ジョブは Claude API を呼ぶため、1 回の実行に数十円かかることがあります。
 
 ```bash
 export HOST_UID=$(id -u) HOST_GID=$(id -g)
@@ -72,9 +101,13 @@ cp .env.example .env
 docker compose run --rm job
 ```
 
-`saved 1 new article(s)` と出たら、<http://localhost:8000/articles> に記事が JSON で返り、<http://localhost:3000> に日付と題名が表示されます。
+`saved N new article(s)` と出たら、<http://localhost:8000/articles> に今日（日本時間）の記事が JSON で返り、<http://localhost:3000> にカードで表示されます。
+過去 24 時間に対象の記事がなければ `N` は 0 で、画面には「この日の記事はまだありません」と出ます。
 エミュレーターのデータは、コンテナを止めると消えます。
 止めるには `docker compose down` を実行します。
+
+API は `GET /articles?date=YYYY-MM-DD` で、指定した日本時間の日付に集めた記事をスコアの高い順に返します。
+`date` を省略すると今日の記事を返します。
 
 ### CI
 
