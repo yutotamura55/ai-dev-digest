@@ -77,7 +77,11 @@ class FakeSummarizer:
         self.summarized.append((entry, body))
         if entry.url in self.failing_urls:
             raise LLMError("fake failure")
-        return Summary(summary_ja=f"{entry.title} の要約", detail_ja=[f"{body[:20]} の詳細"])
+        return Summary(
+            title_ja=f"{entry.title} の訳",
+            summary_ja=f"{entry.title} の要約",
+            detail_ja=[f"{body[:20]} の詳細"],
+        )
 
 
 def rss(items: Iterable[str]) -> bytes:
@@ -144,6 +148,7 @@ def article(
 ) -> Article:
     return Article(
         title="Release",
+        title_ja="リリース",
         url=url,
         source="Example",
         published_at=published_at,

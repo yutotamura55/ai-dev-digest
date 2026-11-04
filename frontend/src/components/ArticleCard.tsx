@@ -2,17 +2,26 @@
 
 import { useState } from "react";
 
-import { type Article, formatTimeInTokyo, hostnameOf } from "@/digest/articles";
+import {
+  type Article,
+  cardTitles,
+  formatTimeInTokyo,
+  hostnameOf,
+} from "@/digest/articles";
 
 // 1 件の記事のカード。押すと同じページ内で広がり、詳細と原文へのリンクを表示する。
 export function ArticleCard({ article }: { article: Article }) {
   const [open, setOpen] = useState(false);
   const toggle = () => setOpen((value) => !value);
+  const titles = cardTitles(article);
   return (
     <article className={open ? "card card-open" : "card"}>
       {/* カード全体で開閉できるようにし、キーボードにはボタンで応える。 */}
       <div className="card-head" onClick={toggle}>
-        <h3>{article.title}</h3>
+        <h3>{titles.heading}</h3>
+        {titles.original !== null && (
+          <p className="card-original-title">{titles.original}</p>
+        )}
         <p className="card-meta">
           {article.source} · {formatTimeInTokyo(article.published_at)}
         </p>

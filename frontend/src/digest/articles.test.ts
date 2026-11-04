@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   type DayDigest,
+  cardTitles,
   fetchDigest,
   formatDateJa,
   formatTimeInTokyo,
@@ -51,6 +52,33 @@ describe("formatTimeInTokyo", () => {
   it("shows the publication time in Japan time", () => {
     // 2026-11-03 15:30 UTC は日本時間で 11 月 4 日 0:30。
     expect(formatTimeInTokyo("2026-11-03T15:30:00Z")).toBe("11/4 00:30");
+  });
+});
+
+describe("cardTitles", () => {
+  it("uses the translation as the heading and keeps the original below", () => {
+    expect(
+      cardTitles({ title: "New model", title_ja: "新しいモデル" }),
+    ).toEqual({
+      heading: "新しいモデル",
+      original: "New model",
+    });
+  });
+
+  it("falls back to the original title when the translation is missing, empty, or the same", () => {
+    expect(cardTitles({ title: "New model" })).toEqual({
+      heading: "New model",
+      original: null,
+    });
+    expect(cardTitles({ title: "New model", title_ja: " " })).toEqual({
+      heading: "New model",
+      original: null,
+    });
+    // RSS の題名に付く末尾の空白は無視して比べる。
+    expect(cardTitles({ title: "Gemma 4 ", title_ja: "Gemma 4" })).toEqual({
+      heading: "Gemma 4",
+      original: null,
+    });
   });
 });
 

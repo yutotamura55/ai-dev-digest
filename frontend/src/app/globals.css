@@ -96,6 +96,12 @@ main > h2 {
   margin-bottom: 0.25rem;
 }
 
+.card-original-title {
+  font-size: 0.9rem;
+  opacity: 0.8;
+  margin-bottom: 0.25rem;
+}
+
 .card-meta {
   font-size: 0.85rem;
   opacity: 0.75;

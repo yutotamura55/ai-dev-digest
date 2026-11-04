@@ -6,7 +6,7 @@ import hashlib
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 TOKYO = ZoneInfo("Asia/Tokyo")
 
@@ -41,16 +41,33 @@ class FeedEntry(BaseModel):
 class Summary(BaseModel):
     """LLM が生成した日本語の要約。"""
 
+    # 題名の日本語訳。固有名詞は原文のまま。
+    title_ja: str
     # 2〜3 文の短い要約。
     summary_ja: str
     # 箇条書きの詳細。
     detail_ja: list[str]
+
+    @field_validator("title_ja")
+    @classmethod
+    def _one_line(_cls, value: str) -> str:
+        """改行や連続する空白を 1 つの空白にし、空なら受け付けない。
+
+        空の訳を保存すると、画面は「訳なし」として原文だけを出す。LLM の応答の不備は
+        LLMError にして、次の実行で生成し直す。
+        """
+        cleaned = " ".join(value.split())
+        if not cleaned:
+            raise ValueError("title_ja must not be empty")
+        return cleaned
 
 
 class Article(BaseModel):
     """Firestore に保存し、API が返す 1 件の記事。"""
 
     title: str
+    # 題名の日本語訳。#14 より前に保存した記事にはないので、空なら画面は原文の題名だけを出す。
+    title_ja: str = ""
     url: str
     source: str
     published_at: datetime

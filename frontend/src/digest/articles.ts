@@ -2,6 +2,8 @@
 
 export type Article = {
   title: string;
+  // 題名の日本語訳。古い記事では空。#14 より前の API の応答にはこの項目自体がない。
+  title_ja?: string;
   url: string;
   source: string;
   published_at: string;
@@ -83,6 +85,20 @@ const timeFormat = new Intl.DateTimeFormat("ja-JP", {
 // 記事の公開日時を日本時間で短く表す。例: 11/3 18:00
 export function formatTimeInTokyo(iso: string): string {
   return timeFormat.format(new Date(iso));
+}
+
+// カードの見出しに出す題名と、その下に小さく出す原文の題名。
+// 日本語訳があれば訳を見出しにし、原文を添える。なければ原文だけを見出しにする。
+export function cardTitles(article: Pick<Article, "title" | "title_ja">): {
+  heading: string;
+  original: string | null;
+} {
+  const original = article.title.trim();
+  const translated = (article.title_ja ?? "").trim();
+  if (translated === "" || translated === original) {
+    return { heading: original, original: null };
+  }
+  return { heading: translated, original };
 }
 
 // 原文へのリンクに添えるホスト名。URL として読めなければ URL をそのまま返す。
