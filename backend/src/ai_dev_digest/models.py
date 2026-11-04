@@ -21,21 +21,27 @@ def date_jst(moment: datetime) -> str:
     return moment.astimezone(TOKYO).date().isoformat()
 
 
-class FeedEntry(BaseModel):
-    """発信元のフィードから取り出した 1 件の項目。選別と要約の入力になる。"""
+class FeedItem(BaseModel):
+    """発信元のフィードから取り出した 1 件の項目。公開日時はフィードになければ None。"""
 
     title: str
     url: str
     # 発信元の名前 (sources.py の Source.name)。
     source: str
-    # 公開日時 (UTC)。フィードに公開日時のない項目は新着を判定できないため、解析の時点で飛ばす。
-    published_at: datetime
+    # 公開日時 (UTC)。フィードにない項目は、発信元の設定で記事ページから補うか飛ばす (job.py)。
+    published_at: datetime | None
     # フィードに含まれる本文か概要。HTML のタグは除いてある。
     content: str = ""
 
     @property
     def id(self) -> str:
         return article_id(self.url)
+
+
+class FeedEntry(FeedItem):
+    """公開日時の分かった項目。選別と要約の入力になる。"""
+
+    published_at: datetime
 
 
 class Summary(BaseModel):

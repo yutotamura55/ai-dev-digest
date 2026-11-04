@@ -12,8 +12,8 @@ from typing import Any
 import feedparser
 import httpx
 
-from ai_dev_digest.html_text import html_to_text
-from ai_dev_digest.models import FeedEntry
+from ai_dev_digest.html_text import html_to_text, published_at_from_html
+from ai_dev_digest.models import FeedItem
 
 logger = logging.getLogger(__name__)
 
@@ -150,38 +150,41 @@ def _read_limited(response: httpx.Response, url: str, max_bytes: int) -> bytes:
     return bytes(body)
 
 
-def parse_feed(body: bytes, source: str) -> list[FeedEntry]:
+def parse_feed(body: bytes, source: str) -> list[FeedItem]:
     """フィードの本文から項目の一覧を作る。
 
-    題名がない項目と、URL が http(s) の形でない項目は飛ばす。公開日時のない項目も、
-    新着かどうかを判定できないため飛ばす。
+    題名がない項目と、URL が http(s) の形でない項目は飛ばす。公開日時のない項目は
+    published_at を None にして返し、扱いは呼び出し側 (job.collect_entries) が決める。
     """
     parsed = feedparser.parse(body)
     if parsed.get("bozo") and not parsed.get("entries"):
         raise FeedError(f"could not parse the feed: {source}")
-    entries = []
-    undated = 0
+    items = []
     for entry in parsed.get("entries", []):
         title = str(entry.get("title", "")).strip()
         url = str(entry.get("link", "")).strip()
         if not title or not _is_web_url(url):
             continue
-        published_at = _published_at(entry)
-        if published_at is None:
-            undated += 1
-            continue
-        entries.append(
-            FeedEntry(
+        items.append(
+            FeedItem(
                 title=title,
                 url=url,
                 source=source,
-                published_at=published_at,
+                published_at=_published_at(entry),
                 content=_content(entry),
             )
         )
-    if undated:
-        logger.warning("%s: skipped %d entries without a publication date", source, undated)
-    return entries
+    return items
+
+
+def fetch_page_date(client: httpx.Client, url: str) -> datetime | None:
+    """記事ページの構造化データから公開日時を読む。取得できないか、日付がなければ None。"""
+    try:
+        body = fetch_url(client, url, MAX_PAGE_BYTES)
+    except FeedError as error:
+        logger.warning("could not read the publication date of %s: %s", url, error)
+        return None
+    return published_at_from_html(body.decode("utf-8", errors="replace"))
 
 
 def _is_web_url(url: str) -> bool:

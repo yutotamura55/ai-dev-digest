@@ -15,7 +15,14 @@ import anthropic
 import httpx
 from google.cloud import firestore
 
-from ai_dev_digest.feed import FeedError, fetch_feed, fetch_page_text, make_client, parse_feed
+from ai_dev_digest.feed import (
+    FeedError,
+    fetch_feed,
+    fetch_page_date,
+    fetch_page_text,
+    make_client,
+    parse_feed,
+)
 from ai_dev_digest.llm import (
     DEFAULT_MODEL,
     SUMMARY_INPUT_CHARS,
@@ -23,7 +30,7 @@ from ai_dev_digest.llm import (
     LLMError,
     Summarizer,
 )
-from ai_dev_digest.models import Article, FeedEntry, date_jst
+from ai_dev_digest.models import Article, FeedEntry, FeedItem, date_jst
 from ai_dev_digest.sources import SOURCES, Source
 from ai_dev_digest.store import ArticleStore, FirestoreArticleStore
 
@@ -33,6 +40,9 @@ DEFAULT_LIMIT = 10
 # 新着とみなす公開日時の範囲。実行の間隔 (1 日) より長くし、実行の遅れや失敗で記事を取りこぼさない
 # ようにする。保存済みの記事は選別の前に除くので、重なった分を 2 回保存することはない。
 DEFAULT_WINDOW = timedelta(hours=48)
+# 公開日時を記事ページから補う発信元で、1 回の実行に読むページの上限。フィードは新しい順なので、
+# これを超える古い項目は飛ばす。
+MAX_DATE_LOOKUPS = 20
 
 
 @dataclass
@@ -49,30 +59,62 @@ class Result:
 
 
 def collect_entries(
-    client: httpx.Client, sources: Sequence[Source], now: datetime, window: timedelta
+    client: httpx.Client,
+    store: ArticleStore,
+    sources: Sequence[Source],
+    now: datetime,
+    window: timedelta,
 ) -> tuple[list[FeedEntry], list[str]]:
     """各発信元から window 以内に公開された項目を集める。失敗した発信元は飛ばして名前を返す。
 
-    同じ URL が複数の発信元にあれば最初の 1 つだけ残す。
+    同じ URL が複数の発信元にあれば最初の 1 つだけ残す。公開日時のない項目は、発信元が
+    date_from_page なら記事ページから補い (保存済みの記事は読まない)、そうでなければ飛ばす。
     """
     entries: dict[str, FeedEntry] = {}
     failed: list[str] = []
     since = now - window
     for source in sources:
         try:
-            parsed = parse_feed(fetch_feed(client, source.feed_url), source=source.name)
+            items = parse_feed(fetch_feed(client, source.feed_url), source=source.name)
         except FeedError as error:
             logger.warning("skipping source %s: %s", source.name, error)
             failed.append(source.name)
             continue
+        dated = _with_dates(client, store, source, items)
         fresh = 0
-        for entry in parsed:
+        for entry in dated:
             # 発信元の時計のずれを見込み、少し先の公開日時も新着に含める。
             if since <= entry.published_at <= now + timedelta(hours=1):
                 fresh += 1
                 entries.setdefault(entry.url, entry)
-        logger.info("%s: %d entries, %d new", source.name, len(parsed), fresh)
+        logger.info("%s: %d entries, %d new", source.name, len(items), fresh)
     return list(entries.values()), failed
+
+
+def _with_dates(
+    client: httpx.Client, store: ArticleStore, source: Source, items: Sequence[FeedItem]
+) -> list[FeedEntry]:
+    """公開日時のある項目にする。ない項目は、発信元の設定に従って記事ページから補うか飛ばす。"""
+    undated = [item for item in items if item.published_at is None]
+    known = store.existing_ids(item.id for item in undated) if undated else set()
+    entries: list[FeedEntry] = []
+    lookups = 0
+    skipped = 0
+    for item in items:
+        published_at = item.published_at
+        lookup = published_at is None and source.date_from_page and item.id not in known
+        if lookup and lookups < MAX_DATE_LOOKUPS:
+            lookups += 1
+            published_at = fetch_page_date(client, item.url)
+        if published_at is None:
+            skipped += 1
+            continue
+        entries.append(
+            FeedEntry(**item.model_dump(exclude={"published_at"}), published_at=published_at)
+        )
+    if skipped:
+        logger.warning("%s: skipped %d entries without a publication date", source.name, skipped)
+    return entries
 
 
 def article_body(client: httpx.Client, source: Source, entry: FeedEntry) -> str:
@@ -113,7 +155,7 @@ def run(
         logger.info("%s already has %d article(s); nothing to do", today, limit)
         return result
 
-    entries, result.failed_sources = collect_entries(client, sources, now, window)
+    entries, result.failed_sources = collect_entries(client, store, sources, now, window)
     known = store.existing_ids(entry.id for entry in entries)
     candidates = [entry for entry in entries if entry.id not in known]
     result.candidates = len(candidates)

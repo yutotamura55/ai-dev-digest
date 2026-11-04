@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
@@ -23,6 +23,7 @@ from tests.conftest import (
 
 OPENAI = Source("OpenAI", "https://openai.example/rss.xml", fetch_body=False)
 GOOGLE = Source("Google", "https://google.example/rss.xml")
+DATELESS = Source("Dateless", "https://dateless.example/rss.xml", date_from_page=True)
 RECENT = "Tue, 03 Nov 2026 20:00:00 GMT"  # NOW の 5 時間前
 OLD = "Sun, 01 Nov 2026 20:00:00 GMT"
 
@@ -59,6 +60,63 @@ def test_run_saves_the_top_relevant_articles_of_the_window() -> None:
         "https://openai.example/b",
         "https://openai.example/d",
     ]
+
+
+def page_with_date(date: str) -> bytes:
+    return (
+        '<html><head><script type="application/ld+json">'
+        f'{{"@type": "Article", "datePublished": "{date}"}}</script></head>'
+        "<body><article><p>Body text of the post.</p></article></body></html>"
+    ).encode()
+
+
+def test_run_reads_missing_dates_from_the_page_for_sources_that_allow_it() -> None:
+    feed = rss(
+        [
+            item("Model today", "https://dateless.example/today", None),
+            item("Model old", "https://dateless.example/old", None),
+            item("Model no date", "https://dateless.example/no-date", None),
+        ]
+    )
+    client, requested = routing_client(
+        {
+            DATELESS.feed_url: feed,
+            "https://dateless.example/today": page_with_date("2026-11-03"),
+            "https://dateless.example/old": page_with_date("2026-10-01"),
+            "https://dateless.example/no-date": b"<p>no structured data</p>",
+        }
+    )
+    store = FakeArticleStore()
+
+    result = job.run(client, store, FakeSummarizer(), [DATELESS], now=NOW)
+
+    assert result.candidates == 1
+    [saved] = store.articles.values()
+    assert saved.url == "https://dateless.example/today"
+    assert saved.published_at == datetime(2026, 11, 3, tzinfo=UTC)
+    # 日付を読むために 3 ページ、要約の本文のために当日の 1 ページを取得する。
+    assert requested.count("https://dateless.example/today") == 2
+    assert requested.count("https://dateless.example/old") == 1
+    assert requested.count("https://dateless.example/no-date") == 1
+
+
+def test_run_does_not_read_the_page_date_of_stored_articles_or_beyond_the_cap() -> None:
+    urls = [f"https://dateless.example/{i}" for i in range(job.MAX_DATE_LOOKUPS + 2)]
+    feed = rss([item(f"Model {i}", url, None) for i, url in enumerate(urls)])
+    routes: dict[str, httpx.Response | bytes] = {DATELESS.feed_url: feed}
+    routes.update({url: page_with_date("2026-11-03") for url in urls})
+    client, requested = routing_client(routes)
+    store = FakeArticleStore()
+    # 先頭の記事は保存済み。日付を読みに行かない。
+    store.save([article(url=urls[0], published_at=NOW)])
+
+    job.run(client, store, FakeSummarizer(), [DATELESS], now=NOW, limit=100)
+
+    assert urls[0] not in requested
+    # 保存済みを除いた先頭の MAX_DATE_LOOKUPS 件だけ日付を読み、残りは飛ばす。
+    looked_up = [url for url in urls[1:] if url in requested]
+    assert len(looked_up) == job.MAX_DATE_LOOKUPS
+    assert urls[-1] not in requested
 
 
 def test_run_continues_when_a_source_fails() -> None:

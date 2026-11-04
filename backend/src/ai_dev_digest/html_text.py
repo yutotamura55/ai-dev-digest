@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
+from datetime import UTC, datetime
 from html.parser import HTMLParser
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -181,6 +184,90 @@ class _TextExtractor(HTMLParser):
 def _normalize(text: str) -> str:
     lines = (re.sub(r"[ \t\r\f\v]+", " ", line).strip() for line in text.split("\n"))
     return "\n".join(line for line in lines if line)
+
+
+class _MetadataCollector(HTMLParser):
+    """JSON-LD の script と、公開日時の meta を集める。"""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.json_ld: list[str] = []
+        self.meta_dates: list[str] = []
+        self._in_json_ld = False
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attributes = dict(attrs)
+        if tag == "script" and attributes.get("type") == "application/ld+json":
+            self._in_json_ld = True
+        if tag == "meta" and attributes.get("content"):
+            key = attributes.get("property") or attributes.get("name") or ""
+            if key in ("article:published_time", "published_time", "datePublished"):
+                self.meta_dates.append(str(attributes["content"]))
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "script":
+            self._in_json_ld = False
+
+    def handle_data(self, data: str) -> None:
+        if self._in_json_ld:
+            self.json_ld.append(data)
+
+
+def _find_date_published(value: Any) -> str | None:
+    """JSON-LD の中 (入れ子や @graph の配列を含む) から datePublished を探す。"""
+    if isinstance(value, dict):
+        published = value.get("datePublished")
+        if isinstance(published, str) and published:
+            return published
+        for child in value.values():
+            found = _find_date_published(child)
+            if found:
+                return found
+    elif isinstance(value, list):
+        for child in value:
+            found = _find_date_published(child)
+            if found:
+                return found
+    return None
+
+
+def _parse_datetime(value: str) -> datetime | None:
+    """ISO 8601 の日時か日付を UTC の datetime にする。
+
+    日付だけなら 0 時、時差がなければ UTC とみなす。
+    """
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def published_at_from_html(html: str) -> datetime | None:
+    """ページの構造化データから公開日時を読む。
+
+    JSON-LD (schema.org) の datePublished を先に、なければ article:published_time などの
+    meta を見る。どちらもなければ None。
+    """
+    collector = _MetadataCollector()
+    collector.feed(html)
+    collector.close()
+    candidates: list[str] = []
+    for raw in collector.json_ld:
+        try:
+            found = _find_date_published(json.loads(raw))
+        except ValueError:
+            continue
+        if found:
+            candidates.append(found)
+    candidates.extend(collector.meta_dates)
+    for candidate in candidates:
+        parsed = _parse_datetime(candidate)
+        if parsed is not None:
+            return parsed
+    return None
 
 
 def html_to_text(html: str, limit: int, fragment: str | None = None) -> str:
