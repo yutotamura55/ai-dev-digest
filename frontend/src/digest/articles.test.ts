@@ -1,81 +1,106 @@
 import { describe, expect, it } from "vitest";
 
-import { type Article, fetchArticles, groupByDate } from "./articles";
+import {
+  type DayDigest,
+  fetchDigest,
+  formatDateJa,
+  formatTimeInTokyo,
+  hostnameOf,
+  isValidDate,
+  shiftDate,
+} from "./articles";
 
-function article(overrides: Partial<Article>): Article {
-  return {
-    title: "Release",
-    url: "https://example.com/news/1",
-    source: "https://example.com/feed.xml",
-    published_at: null,
-    fetched_at: "2026-11-04T00:00:00Z",
-    ...overrides,
-  };
-}
-
-describe("groupByDate", () => {
-  it("groups by the publication date in Japan time, newest first", () => {
-    const groups = groupByDate([
-      article({
-        url: "https://example.com/a",
-        published_at: "2026-11-02T10:00:00Z",
-      }),
-      // 2026-11-03 15:30 UTC は日本時間で 11 月 4 日。
-      article({
-        url: "https://example.com/b",
-        published_at: "2026-11-03T15:30:00Z",
-      }),
-      article({
-        url: "https://example.com/c",
-        published_at: "2026-11-02T01:00:00Z",
-      }),
-    ]);
-
-    expect(groups.map((g) => g.date)).toEqual(["2026-11-04", "2026-11-02"]);
-    expect(groups[1].articles.map((a) => a.url)).toEqual([
-      "https://example.com/a",
-      "https://example.com/c",
-    ]);
+describe("isValidDate", () => {
+  it("accepts a real YYYY-MM-DD date", () => {
+    expect(isValidDate("2026-11-04")).toBe(true);
+    expect(isValidDate("2024-02-29")).toBe(true);
   });
 
-  it("uses the fetch date when the publication date is missing", () => {
-    const groups = groupByDate([
-      article({ fetched_at: "2026-11-01T00:00:00Z" }),
-    ]);
-
-    expect(groups[0].date).toBe("2026-11-01");
+  it("rejects other formats and impossible dates", () => {
+    expect(isValidDate("2026-11-4")).toBe(false);
+    expect(isValidDate("20261104")).toBe(false);
+    expect(isValidDate("2026-02-30")).toBe(false);
+    expect(isValidDate("2026-13-01")).toBe(false);
+    expect(isValidDate("abc")).toBe(false);
   });
 });
 
-describe("fetchArticles", () => {
-  it("returns the articles from the API", async () => {
-    const body = [article({})];
-    const fetcher = async (input: RequestInfo | URL) => {
-      expect(String(input)).toBe("http://api:8000/articles");
-      return Response.json(body);
-    };
-
-    await expect(
-      fetchArticles("http://api:8000", fetcher as typeof fetch),
-    ).resolves.toEqual(body);
+describe("shiftDate", () => {
+  it("moves across month and year boundaries", () => {
+    expect(shiftDate("2026-11-04", -1)).toBe("2026-11-03");
+    expect(shiftDate("2026-11-30", 1)).toBe("2026-12-01");
+    expect(shiftDate("2026-01-01", -1)).toBe("2025-12-31");
   });
 
-  it("keeps the path of the base URL", async () => {
+  it("rejects an invalid date", () => {
+    expect(() => shiftDate("2026-02-30", 1)).toThrow("invalid date");
+  });
+});
+
+describe("formatDateJa", () => {
+  it("formats the date with the weekday in Japanese", () => {
+    expect(formatDateJa("2026-11-04")).toBe("2026年11月4日(水)");
+  });
+
+  it("rejects an invalid date", () => {
+    expect(() => formatDateJa("nope")).toThrow("invalid date");
+  });
+});
+
+describe("formatTimeInTokyo", () => {
+  it("shows the publication time in Japan time", () => {
+    // 2026-11-03 15:30 UTC は日本時間で 11 月 4 日 0:30。
+    expect(formatTimeInTokyo("2026-11-03T15:30:00Z")).toBe("11/4 00:30");
+  });
+});
+
+describe("hostnameOf", () => {
+  it("returns the host of a URL and the input when it is not a URL", () => {
+    expect(hostnameOf("https://example.com/news/1?x=1")).toBe("example.com");
+    expect(hostnameOf("not a url")).toBe("not a url");
+  });
+});
+
+describe("fetchDigest", () => {
+  const digest: DayDigest = {
+    date: "2026-11-04",
+    today: "2026-11-04",
+    articles: [],
+  };
+
+  it("asks the API for today when no date is given", async () => {
     const fetcher = async (input: RequestInfo | URL) => {
-      expect(String(input)).toBe("https://example.com/api/articles");
-      return Response.json([]);
+      expect(String(input)).toBe("http://api:8000/articles");
+      return Response.json(digest);
     };
 
     await expect(
-      fetchArticles("https://example.com/api/", fetcher as typeof fetch),
-    ).resolves.toEqual([]);
+      fetchDigest("http://api:8000", undefined, fetcher as typeof fetch),
+    ).resolves.toEqual(digest);
+  });
+
+  it("passes the date and keeps the path of the base URL", async () => {
+    const fetcher = async (input: RequestInfo | URL) => {
+      expect(String(input)).toBe(
+        "https://example.com/api/articles?date=2026-11-03",
+      );
+      return Response.json(digest);
+    };
+
+    await expect(
+      fetchDigest(
+        "https://example.com/api/",
+        "2026-11-03",
+        fetcher as typeof fetch,
+      ),
+    ).resolves.toEqual(digest);
   });
 
   it("throws when the API fails", async () => {
     const fetcher = async () => new Response("", { status: 503 });
 
     await expect(
-      fetchArticles("http://api:8000", fetcher as typeof fetch),
+      fetchDigest("http://api:8000", undefined, fetcher as typeof fetch),
     ).rejects.toThrow("503");
   });
 });

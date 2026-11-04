@@ -47,3 +47,87 @@ a {
     color-scheme: dark;
   }
 }
+
+main {
+  width: 100%;
+  max-width: 48rem;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 3rem;
+}
+
+main > h1 {
+  font-size: 1.5rem;
+  margin-bottom: 0.25rem;
+}
+
+main > p,
+main > h2 {
+  margin-bottom: 0.75rem;
+}
+
+.day-nav {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.day-nav a {
+  text-decoration: underline;
+}
+
+.cards {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.card {
+  border: 1px solid rgb(128 128 128 / 40%);
+  border-radius: 0.5rem;
+  padding: 0.75rem 1rem;
+}
+
+.card-head {
+  cursor: pointer;
+}
+
+.card-head h3 {
+  font-size: 1.05rem;
+  margin-bottom: 0.25rem;
+}
+
+.card-meta {
+  font-size: 0.85rem;
+  opacity: 0.75;
+  margin-bottom: 0.5rem;
+}
+
+.card-toggle {
+  margin-top: 0.5rem;
+  background: none;
+  border: 1px solid rgb(128 128 128 / 60%);
+  border-radius: 0.25rem;
+  color: inherit;
+  padding: 0.2rem 0.6rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.card-detail {
+  margin-top: 0.75rem;
+  border-top: 1px solid rgb(128 128 128 / 40%);
+  padding-top: 0.75rem;
+}
+
+.card-detail ul {
+  padding-left: 1.25rem;
+  margin-bottom: 0.75rem;
+}
+
+.card-detail li {
+  margin-bottom: 0.25rem;
+}
+
+.card-detail a {
+  text-decoration: underline;
+}

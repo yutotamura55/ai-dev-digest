@@ -1,40 +1,28 @@
 import { connection } from "next/server";
 import { Suspense } from "react";
 
-import { fetchArticles, groupByDate } from "@/digest/articles";
+import { DigestView } from "@/components/DigestView";
+import { fetchDigest } from "@/digest/articles";
 
 export default function Home() {
   return (
     <main>
       <h1>ai-dev-digest</h1>
-      <p>生成 AI の開発に関する公式の発信を、日付ごとにまとめます。</p>
+      <p>
+        生成 AI の開発に関する公式の発信を、日本語の要約で日付ごとにまとめます。
+      </p>
       <Suspense fallback={<p>読み込み中…</p>}>
-        <ArticleList />
+        <TodayDigest />
       </Suspense>
     </main>
   );
 }
 
-async function ArticleList() {
+async function TodayDigest() {
   // 記事はリクエストのたびに API から読む。環境変数もリクエストの時点で読む。
   await connection();
   const apiBaseUrl = process.env.API_BASE_URL ?? "http://localhost:8000";
-  const groups = groupByDate(await fetchArticles(apiBaseUrl));
-  if (groups.length === 0) {
-    return <p>まだ記事がありません。</p>;
-  }
-  return groups.map((group) => (
-    <section key={group.date}>
-      <h2>{group.date}</h2>
-      <ul>
-        {group.articles.map((article) => (
-          <li key={article.url}>
-            <a href={article.url} rel="noopener noreferrer">
-              {article.title}
-            </a>
-          </li>
-        ))}
-      </ul>
-    </section>
-  ));
+  // 今日の日付は API が日本時間で決める。画面とジョブで日付の区切りをそろえるため。
+  const digest = await fetchDigest(apiBaseUrl);
+  return <DigestView digest={digest} />;
 }
