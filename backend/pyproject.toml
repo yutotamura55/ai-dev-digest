@@ -1,0 +1,70 @@
+[project]
+name = "ai-dev-digest"
+version = "0.1.0"
+description = "Collects official AI development news and serves it as a daily digest."
+license = "MIT"
+requires-python = ">=3.14"
+dependencies = [
+    "fastapi>=0.162.0",
+    "feedparser>=6.0.14",
+    "google-cloud-firestore>=2.34.1",
+    "httpx>=0.28.1",
+    "pydantic>=2.14.2",
+    "uvicorn>=0.54.0",
+]
+
+[dependency-groups]
+dev = [
+    "mypy>=2.4.1",
+    "pip-audit>=2.10.1",
+    "pytest>=9.2.0",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.17.3",
+    "vulture>=2.16",
+]
+
+[build-system]
+requires = ["uv_build>=0.13.7,<0.14"]
+build-backend = "uv_build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+# E/W/F：基本、I：import の順、B：誤りやすい書き方、UP：新しい書き方、S：セキュリティ（flake8-bandit 相当）、
+# C901：複雑度、SIM：簡単にできる書き方、RUF：Ruff 独自。
+select = ["E", "W", "F", "I", "B", "UP", "S", "C901", "SIM", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+# pytest は assert で結果を確かめるため、テストに限って S101（assert の使用）を外す。
+"tests/**" = ["S101"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.mypy]
+strict = true
+files = ["src", "tests"]
+
+[[tool.mypy.overrides]]
+# feedparser 6.0 は型の情報（py.typed）を含まず、型スタブも公開されていない。
+module = ["feedparser", "feedparser.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+addopts = "--strict-markers"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+source = ["ai_dev_digest"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+fail_under = 97.56
+
+[tool.vulture]
+paths = ["src", "tests"]
+min_confidence = 80

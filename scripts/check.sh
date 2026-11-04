@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+# CI と同じ検査をすべて実行する。開発用のコンテナの中で動かす：
+#   docker compose run --rm dev scripts/check.sh
+# 依存が lockfile と合っていなければ先に入れ直し、検査はどれか 1 つでも失敗したら止まる。
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+: "${FIRESTORE_EMULATOR_HOST:?run this in the dev container: docker compose run --rm dev scripts/check.sh}"
+
+# PR で変更した行のカバレッジの下限 (%)。
+DIFF_COVERAGE_FLOOR=80
+# 変更した行を比べる相手。CI では fetch-depth: 0 で取得した origin/main になる。
+COMPARE_BRANCH="${COMPARE_BRANCH:-origin/main}"
+
+step() { printf '\n==> %s\n' "$*"; }
+
+step "Install dependencies from the lockfiles"
+uv sync --project backend --locked --quiet
+uv sync --project tools --locked --quiet
+# npm ci は node_modules を消して入れ直すため、lockfile が変わったときだけ実行する。
+lock_hash="$(sha256sum frontend/package-lock.json | cut -d' ' -f1)"
+if [[ "$(cat frontend/node_modules/.lock-hash 2>/dev/null)" != "$lock_hash" ]]; then
+  npm ci --prefix frontend --no-audit --no-fund
+  echo "$lock_hash" > frontend/node_modules/.lock-hash
+fi
+
+step "Repository: Dockerfile, shell scripts, workflows"
+hadolint Dockerfile
+shellcheck scripts/*.sh
+actionlint
+uv run --project tools --locked zizmor --offline .github/workflows
+
+step "Repository: security static analysis (Semgrep CE)"
+# 規則は Semgrep の公開の規則集から実行時に取得する。リポジトリには同梱しない。
+uv run --project tools --locked semgrep scan --metrics=off --error --quiet \
+  --config p/python --config p/typescript --config p/react --config p/nextjs \
+  --config p/dockerfile --config p/github-actions
+
+step "Backend (Python): format, lint, types, unused code, tests, audit"
+(
+  cd backend
+  uv run --locked ruff format --check .
+  uv run --locked ruff check .
+  uv run --locked mypy
+  uv run --locked vulture
+  uv run --locked pytest -q --cov --cov-report=term --cov-report=xml:coverage.xml
+  # 自分自身 (ai-dev-digest) は PyPI にないため、lockfile から書き出した依存だけを監査する。
+  requirements="$(mktemp)"
+  uv export --locked --all-groups --no-emit-project --quiet --output-file "$requirements"
+  uv run --locked pip-audit --strict --disable-pip --require-hashes --requirement "$requirements"
+  rm -f "$requirements"
+)
+
+step "Frontend (Next.js): format, lint, types, unused code, tests, audit"
+(
+  cd frontend
+  npm run --silent check
+  # 本番の依存は、勧告が 1 件でもあれば失敗にする。
+  npm audit --omit=dev
+  # 開発用の道具を含めると、ESLint 9 とそのプラグインが古い minimatch を使っており
+  # moderate の勧告 (GHSA-g3hv-75wg-m249) が残る。Next.js の ESLint 設定が ESLint 10 に
+  # 対応するまでは、開発用を含む監査は high 以上で失敗にする。
+  npm audit --audit-level=high
+)
+
+step "Coverage of the changed lines (compared with ${COMPARE_BRANCH})"
+if git rev-parse --verify --quiet "${COMPARE_BRANCH}^{commit}" > /dev/null; then
+  uv run --project tools --locked diff-cover \
+    backend/coverage.xml frontend/coverage/cobertura-coverage.xml \
+    --compare-branch "$COMPARE_BRANCH" --fail-under "$DIFF_COVERAGE_FLOOR"
+else
+  echo "error: ${COMPARE_BRANCH} does not exist here; run 'git fetch origin' first" >&2
+  exit 1
+fi
+
+step "All checks passed"
