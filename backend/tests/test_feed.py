@@ -14,6 +14,7 @@ from ai_dev_digest.feed import (
     FeedError,
     fetch_feed,
     fetch_page_text,
+    make_client,
     parse_feed,
 )
 from tests.conftest import PUBLIC_ADDRESS, REAL_RESOLVE_ADDRESSES, original_url
@@ -79,6 +80,23 @@ def test_entry_id_depends_only_on_url(feed_body: bytes) -> None:
 
     assert first.id == again.id
     assert len(first.id) == 32
+
+
+def test_make_client_sends_the_user_agent_and_does_not_keep_connections_alive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    sentinel = httpx.Client()
+
+    def fake_client(**kwargs: object) -> httpx.Client:
+        captured.update(kwargs)
+        return sentinel
+
+    monkeypatch.setattr("ai_dev_digest.feed.httpx.Client", fake_client)
+
+    assert make_client() is sentinel
+    assert captured["headers"] == {"User-Agent": feed.USER_AGENT}
+    assert captured["limits"] == httpx.Limits(max_keepalive_connections=0)
 
 
 def test_fetch_feed_returns_the_body(feed_body: bytes) -> None:

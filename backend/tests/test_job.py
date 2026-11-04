@@ -288,7 +288,7 @@ def test_main_reads_settings_from_the_environment(monkeypatch: pytest.MonkeyPatc
     calls: dict[str, object] = {}
 
     def fake_run(client: httpx.Client, store: object, summarizer: object, **kwargs: object) -> None:
-        calls["user_agent"] = client.headers["user-agent"]
+        calls["client"] = client
         calls["store"] = store
         calls["summarizer"] = summarizer
         calls.update(kwargs)
@@ -301,10 +301,12 @@ def test_main_reads_settings_from_the_environment(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr("ai_dev_digest.job.firestore.Client", lambda: None)
     monkeypatch.setattr("ai_dev_digest.job.anthropic.Anthropic", lambda: "client")
     monkeypatch.setattr("ai_dev_digest.job.ClaudeSummarizer", lambda client, model: (client, model))
+    http_client = httpx.Client()
+    monkeypatch.setattr("ai_dev_digest.job.make_client", lambda: http_client)
 
     job.main()
 
     assert calls["store"] == "store"
     assert calls["summarizer"] == ("client", "claude-haiku-5-5")
     assert calls["limit"] == 3
-    assert calls["user_agent"] == job.USER_AGENT
+    assert calls["client"] is http_client

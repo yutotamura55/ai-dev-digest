@@ -24,12 +24,26 @@ MAX_PAGE_BYTES = 2_000_000
 MAX_CONTENT_CHARS = 4_000
 TIMEOUT_SECONDS = 20.0
 MAX_REDIRECTS = 5
+USER_AGENT = "ai-dev-digest (+https://github.com/yutotamura55/ai-dev-digest)"
 # 取得してはいけない宛先。IP アドレスで書かれた宛先は、別にグローバルなものだけを許す。
 BLOCKED_HOSTS = frozenset({"localhost", "metadata.google.internal", "metadata"})
 
 
 class FeedError(Exception):
     """フィードや記事ページを取得または解析できなかった。"""
+
+
+def make_client() -> httpx.Client:
+    """fetch_url に渡す HTTP クライアント。
+
+    接続を使い回さない (keep-alive を 0 にする)。fetch_url は確かめた IP アドレスに接続するため、
+    同じ IP に解決される別のホスト名の要求が前の TLS 接続を使い回すと、証明書をそのホスト名で
+    検証しないまま通信してしまう。要求のたびに接続し直して、毎回ホスト名を検証する。
+    """
+    return httpx.Client(
+        headers={"User-Agent": USER_AGENT},
+        limits=httpx.Limits(max_keepalive_connections=0),
+    )
 
 
 def resolve_addresses(host: str) -> list[str]:
@@ -66,7 +80,7 @@ def check_url(url: httpx.URL) -> IPAddress:
 
 
 def fetch_url(client: httpx.Client, url: str, max_bytes: int) -> bytes:
-    """URL の本文を取得する。
+    """URL の本文を取得する。client は make_client() で作ったものを渡す。
 
     リダイレクトは 1 段ずつ宛先を確かめてからたどる。HTTP の失敗、許さない宛先、
     上限を超える本文は FeedError にする。本文は上限を超えた時点で読むのをやめる。

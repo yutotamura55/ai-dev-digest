@@ -15,7 +15,7 @@ import anthropic
 import httpx
 from google.cloud import firestore
 
-from ai_dev_digest.feed import FeedError, fetch_feed, fetch_page_text, parse_feed
+from ai_dev_digest.feed import FeedError, fetch_feed, fetch_page_text, make_client, parse_feed
 from ai_dev_digest.llm import (
     DEFAULT_MODEL,
     SUMMARY_INPUT_CHARS,
@@ -33,7 +33,6 @@ DEFAULT_LIMIT = 10
 # 新着とみなす公開日時の範囲。実行の間隔 (1 日) より長くし、実行の遅れや失敗で記事を取りこぼさない
 # ようにする。保存済みの記事は選別の前に除くので、重なった分を 2 回保存することはない。
 DEFAULT_WINDOW = timedelta(hours=48)
-USER_AGENT = "ai-dev-digest (+https://github.com/yutotamura55/ai-dev-digest)"
 
 
 @dataclass
@@ -180,7 +179,7 @@ def main() -> None:
     model = os.environ.get("LLM_MODEL", DEFAULT_MODEL)
     limit = int(os.environ.get("MAX_ARTICLES_PER_DAY", str(DEFAULT_LIMIT)))
     summarizer = ClaudeSummarizer(anthropic.Anthropic(), model=model)
-    with httpx.Client(headers={"User-Agent": USER_AGENT}) as client:
+    with make_client() as client:
         run(client, FirestoreArticleStore(firestore.Client()), summarizer, limit=limit)
 
 
