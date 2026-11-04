@@ -197,10 +197,12 @@ class _MetadataCollector(HTMLParser):
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attributes = dict(attrs)
-        if tag == "script" and attributes.get("type") == "application/ld+json":
-            self._in_json_ld = True
+        if tag == "script":
+            # "application/ld+json; charset=utf-8" のように引数が付くことがある。
+            mime = (attributes.get("type") or "").split(";")[0].strip().lower()
+            self._in_json_ld = mime == "application/ld+json"
         if tag == "meta" and attributes.get("content"):
-            key = attributes.get("property") or attributes.get("name") or ""
+            key = attributes.get("property") or attributes.get("name") or attributes.get("itemprop")
             if key in ("article:published_time", "published_time", "datePublished"):
                 self.meta_dates.append(str(attributes["content"]))
 
@@ -237,12 +239,13 @@ def _parse_datetime(value: str) -> datetime | None:
     日付だけなら 0 時、時差がなければ UTC とみなす。
     """
     try:
-        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
-    except ValueError:
+        parsed = datetime.fromisoformat(value.strip())
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=UTC)
+        return parsed.astimezone(UTC)
+    except ValueError, OverflowError:
+        # 形が違うか、"0001-01-01T00:00:00+09:00" のように UTC に直せない日付。
         return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
-    return parsed.astimezone(UTC)
 
 
 def published_at_from_html(html: str) -> datetime | None:

@@ -216,6 +216,20 @@ def test_published_at_falls_back_to_meta_tags() -> None:
     assert published_at_from_html(html) == datetime(2026, 11, 2, 17, 45, tzinfo=UTC)
 
 
+def test_published_at_accepts_a_mime_parameter_and_itemprop_meta() -> None:
+    with_charset = (
+        '<script type="application/ld+json; charset=utf-8">{"datePublished": "2026-11-03"}</script>'
+    )
+    assert published_at_from_html(with_charset) == datetime(2026, 11, 3, tzinfo=UTC)
+    assert published_at_from_html('<meta itemprop="datePublished" content="2026-11-02">') == (
+        datetime(2026, 11, 2, tzinfo=UTC)
+    )
+
+
+def test_published_at_is_none_for_a_date_that_cannot_be_converted_to_utc() -> None:
+    assert published_at_from_html(ld('{"datePublished": "0001-01-01T00:00:00+09:00"}')) is None
+
+
 def test_published_at_is_none_without_a_usable_date() -> None:
     assert published_at_from_html("<p>no metadata</p>") is None
     assert published_at_from_html('<meta name="description" content="2026-11-03">') is None

@@ -88,16 +88,71 @@ def test_run_reads_missing_dates_from_the_page_for_sources_that_allow_it() -> No
     )
     store = FakeArticleStore()
 
-    result = job.run(client, store, FakeSummarizer(), [DATELESS], now=NOW)
+    summarizer = FakeSummarizer()
+    result = job.run(client, store, summarizer, [DATELESS], now=NOW)
 
     assert result.candidates == 1
     [saved] = store.articles.values()
     assert saved.url == "https://dateless.example/today"
     assert saved.published_at == datetime(2026, 11, 3, tzinfo=UTC)
-    # 日付を読むために 3 ページ、要約の本文のために当日の 1 ページを取得する。
-    assert requested.count("https://dateless.example/today") == 2
+    # 日付を読むために 3 ページを取得し、要約の本文には同じページを使い回す (2 回取得しない)。
+    assert requested.count("https://dateless.example/today") == 1
     assert requested.count("https://dateless.example/old") == 1
     assert requested.count("https://dateless.example/no-date") == 1
+    assert summarizer.summarized[0][1] == "Body text of the post."
+
+
+def test_run_keeps_a_date_only_publication_of_the_oldest_day_in_the_window() -> None:
+    # NOW は 2026-11-04 01:00 UTC。窓の始まりは 11-02 01:00 UTC で、日付だけの 11-02 (0:00 UTC) は
+    # そのままでは外れるが、その日のうちの公開なので 1 日の余裕で含める。11-01 は含めない。
+    feed = rss(
+        [
+            item("Model Nov 2", "https://dateless.example/nov2", None),
+            item("Model Nov 1", "https://dateless.example/nov1", None),
+        ]
+    )
+    client, _ = routing_client(
+        {
+            DATELESS.feed_url: feed,
+            "https://dateless.example/nov2": page_with_date("2026-11-02"),
+            "https://dateless.example/nov1": page_with_date("2026-11-01"),
+        }
+    )
+    store = FakeArticleStore()
+
+    job.run(client, store, FakeSummarizer(), [DATELESS], now=NOW, limit=10)
+
+    assert [a.url for a in store.articles.values()] == ["https://dateless.example/nov2"]
+
+
+def test_run_skips_a_dateless_entry_whose_page_cannot_be_fetched(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    feed = rss([item("Model gone", "https://dateless.example/gone", None)])
+    client, requested = routing_client(
+        {DATELESS.feed_url: feed, "https://dateless.example/gone": httpx.Response(403)}
+    )
+    summarizer = FakeSummarizer()
+
+    result = job.run(client, FakeArticleStore(), summarizer, [DATELESS], now=NOW)
+
+    assert result.candidates == 0
+    assert summarizer.judged == []
+    assert requested.count("https://dateless.example/gone") == 1
+    assert "could not read the publication date" in caplog.text
+
+
+def test_run_does_not_request_a_failed_page_twice() -> None:
+    feed = rss([item("Model G", "https://google.example/g", RECENT, "Feed text.")])
+    client, requested = routing_client(
+        {GOOGLE.feed_url: feed, "https://google.example/g": httpx.Response(403)}
+    )
+    summarizer = FakeSummarizer()
+
+    job.run(client, FakeArticleStore(), summarizer, [GOOGLE], now=NOW)
+
+    assert summarizer.summarized[0][1] == "Feed text."
+    assert requested.count("https://google.example/g") == 1
 
 
 def test_run_does_not_read_the_page_date_of_stored_articles_or_beyond_the_cap() -> None:

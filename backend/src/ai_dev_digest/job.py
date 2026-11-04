@@ -18,9 +18,10 @@ from google.cloud import firestore
 from ai_dev_digest.feed import (
     FeedError,
     fetch_feed,
-    fetch_page_date,
-    fetch_page_text,
+    fetch_page,
     make_client,
+    page_date,
+    page_text,
     parse_feed,
 )
 from ai_dev_digest.llm import (
@@ -43,6 +44,33 @@ DEFAULT_WINDOW = timedelta(hours=48)
 # 公開日時を記事ページから補う発信元で、1 回の実行に読むページの上限。フィードは新しい順なので、
 # これを超える古い項目は飛ばす。
 MAX_DATE_LOOKUPS = 20
+# ページから読んだ公開日が日付だけ (時刻が 0:00 UTC) のとき、その日のどの時刻の公開でも
+# 新着に含めるための余裕。
+DATE_ONLY_TOLERANCE = timedelta(days=1)
+
+
+class PageCache:
+    """1 回の実行の中で、同じ記事ページを 2 回取得しないための記録。
+
+    公開日時を読むためと要約の本文のために同じページを使うので、HTML を URL ごとに覚える。
+    取得の失敗も覚え、同じ URL に 2 回要求しない。
+    """
+
+    def __init__(self, client: httpx.Client) -> None:
+        self._client = client
+        self._pages: dict[str, tuple[str, httpx.URL] | FeedError] = {}
+
+    def get(self, url: str) -> tuple[str, httpx.URL]:
+        """ページの HTML と最終的な URL。取得できなければ FeedError。"""
+        if url not in self._pages:
+            try:
+                self._pages[url] = fetch_page(self._client, url)
+            except FeedError as error:
+                self._pages[url] = error
+        page = self._pages[url]
+        if isinstance(page, FeedError):
+            raise page
+        return page
 
 
 @dataclass
@@ -60,6 +88,7 @@ class Result:
 
 def collect_entries(
     client: httpx.Client,
+    pages: PageCache,
     store: ArticleStore,
     sources: Sequence[Source],
     now: datetime,
@@ -80,49 +109,72 @@ def collect_entries(
             logger.warning("skipping source %s: %s", source.name, error)
             failed.append(source.name)
             continue
-        dated = _with_dates(client, store, source, items)
         fresh = 0
-        for entry in dated:
-            # 発信元の時計のずれを見込み、少し先の公開日時も新着に含める。
-            if since <= entry.published_at <= now + timedelta(hours=1):
+        for entry in _with_dates(pages, store, source, items):
+            # 発信元の時計のずれを見込み、少し先の公開日時も新着に含める。日付だけの公開日は
+            # 0:00 UTC なので、その日のうちの公開なら窓に入るよう 1 日の余裕を足す。
+            tolerance = DATE_ONLY_TOLERANCE if _is_date_only(entry.published_at) else timedelta()
+            if since - tolerance <= entry.published_at <= now + timedelta(hours=1):
                 fresh += 1
                 entries.setdefault(entry.url, entry)
         logger.info("%s: %d entries, %d new", source.name, len(items), fresh)
     return list(entries.values()), failed
 
 
+def _is_date_only(moment: datetime) -> bool:
+    """時刻が 0:00:00 UTC か。ページの構造化データの日付だけの値はこの形になる (html_text)。"""
+    return moment.astimezone(UTC).time() == datetime.min.time()
+
+
 def _with_dates(
-    client: httpx.Client, store: ArticleStore, source: Source, items: Sequence[FeedItem]
+    pages: PageCache, store: ArticleStore, source: Source, items: Sequence[FeedItem]
 ) -> list[FeedEntry]:
     """公開日時のある項目にする。ない項目は、発信元の設定に従って記事ページから補うか飛ばす。"""
     undated = [item for item in items if item.published_at is None]
-    known = store.existing_ids(item.id for item in undated) if undated else set()
+    known = store.existing_ids(item.id for item in undated)
     entries: list[FeedEntry] = []
     lookups = 0
-    skipped = 0
+    unresolved = 0
+    capped = 0
     for item in items:
         published_at = item.published_at
-        lookup = published_at is None and source.date_from_page and item.id not in known
-        if lookup and lookups < MAX_DATE_LOOKUPS:
+        if published_at is None and source.date_from_page and item.id not in known:
+            if lookups >= MAX_DATE_LOOKUPS:
+                capped += 1
+                continue
             lookups += 1
-            published_at = fetch_page_date(client, item.url)
+            published_at = _page_date(pages, item.url)
         if published_at is None:
-            skipped += 1
+            if item.id not in known:
+                unresolved += 1
             continue
         entries.append(
             FeedEntry(**item.model_dump(exclude={"published_at"}), published_at=published_at)
         )
-    if skipped:
-        logger.warning("%s: skipped %d entries without a publication date", source.name, skipped)
+    if capped:
+        logger.info(
+            "%s: %d entries beyond the %d page lookups", source.name, capped, MAX_DATE_LOOKUPS
+        )
+    if unresolved:
+        logger.warning("%s: skipped %d entries without a publication date", source.name, unresolved)
     return entries
 
 
-def article_body(client: httpx.Client, source: Source, entry: FeedEntry) -> str:
+def _page_date(pages: PageCache, url: str) -> datetime | None:
+    """記事ページの公開日時。取得できないか、日付がなければ None。"""
+    try:
+        return page_date(pages.get(url))
+    except FeedError as error:
+        logger.warning("could not read the publication date of %s: %s", url, error)
+        return None
+
+
+def article_body(pages: PageCache, source: Source, entry: FeedEntry) -> str:
     """要約に使う本文。発信元が許せば記事ページを取得し、できなければフィードの本文を使う。"""
     if not source.fetch_body:
         return entry.content
     try:
-        text = fetch_page_text(client, entry.url, SUMMARY_INPUT_CHARS)
+        text = page_text(pages.get(entry.url), SUMMARY_INPUT_CHARS)
     except FeedError as error:
         logger.warning("using the feed content for %s: %s", entry.url, error)
         return entry.content
@@ -155,7 +207,8 @@ def run(
         logger.info("%s already has %d article(s); nothing to do", today, limit)
         return result
 
-    entries, result.failed_sources = collect_entries(client, store, sources, now, window)
+    pages = PageCache(client)
+    entries, result.failed_sources = collect_entries(client, pages, store, sources, now, window)
     known = store.existing_ids(entry.id for entry in entries)
     candidates = [entry for entry in entries if entry.id not in known]
     result.candidates = len(candidates)
@@ -175,7 +228,7 @@ def run(
     for entry in relevant:
         if filled >= remaining:
             break
-        body = article_body(client, by_name[entry.source], entry)
+        body = article_body(pages, by_name[entry.source], entry)
         try:
             summary = summarizer.summarize(entry, body)
         except LLMError as error:

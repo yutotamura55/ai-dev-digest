@@ -13,9 +13,10 @@ from ai_dev_digest.feed import (
     MAX_REDIRECTS,
     FeedError,
     fetch_feed,
-    fetch_page_date,
+    fetch_page,
     fetch_page_text,
     make_client,
+    page_date,
     parse_feed,
 )
 from tests.conftest import PUBLIC_ADDRESS, REAL_RESOLVE_ADDRESSES, original_url
@@ -217,22 +218,23 @@ def test_fetch_page_text_drops_the_fragment_when_the_redirect_clears_it() -> Non
         assert fetch_page_text(client, "https://example.com/notes#y", limit=100) == "Y\ny\nZ\nz"
 
 
-def test_fetch_page_date_reads_the_structured_data() -> None:
+def test_page_date_reads_the_structured_data_of_a_fetched_page() -> None:
     html = (
         b'<html><head><script type="application/ld+json">'
         b'{"@type": "Article", "datePublished": "2026-11-03"}</script></head></html>'
     )
     with client_returning(httpx.Response(200, content=html)) as client:
-        assert fetch_page_date(client, "https://example.com/post") == datetime(
-            2026, 11, 3, tzinfo=UTC
-        )
+        page = fetch_page(client, "https://example.com/post")
+
+    assert page_date(page) == datetime(2026, 11, 3, tzinfo=UTC)
+    assert str(page[1]) == "https://example.com/post"
 
 
-def test_fetch_page_date_is_none_when_the_page_fails_or_has_no_date() -> None:
-    with client_returning(httpx.Response(403)) as client:
-        assert fetch_page_date(client, "https://example.com/post") is None
+def test_page_date_is_none_without_a_date_and_fetch_page_raises_on_failure() -> None:
     with client_returning(httpx.Response(200, content=b"<p>no date</p>")) as client:
-        assert fetch_page_date(client, "https://example.com/post") is None
+        assert page_date(fetch_page(client, "https://example.com/post")) is None
+    with client_returning(httpx.Response(403)) as client, pytest.raises(FeedError):
+        fetch_page(client, "https://example.com/post")
 
 
 def test_fetch_page_text_cuts_at_the_limit() -> None:

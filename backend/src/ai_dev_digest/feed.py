@@ -131,14 +131,25 @@ def fetch_feed(client: httpx.Client, url: str) -> bytes:
     return fetch_url(client, url, MAX_FEED_BYTES)
 
 
-def fetch_page_text(client: httpx.Client, url: str, limit: int) -> str:
-    """記事ページを取得し、本文の文字を最大 limit 文字で返す。
+def fetch_page(client: httpx.Client, url: str) -> tuple[str, httpx.URL]:
+    """記事ページの HTML と、リダイレクトをたどった後の URL を返す。"""
+    body, final_url = _fetch(client, url, MAX_PAGE_BYTES)
+    return body.decode("utf-8", errors="replace"), final_url
+
+
+def page_text(page: tuple[str, httpx.URL], limit: int) -> str:
+    """取得したページ (fetch_page の結果) から本文の文字を最大 limit 文字で返す。
 
     URL にフラグメント (`#november-3-2026` など) があれば、その id の要素から始まる節だけを返す。
     1 ページに日付ごとの節が並ぶリリースノートで、その日の分だけを要約に渡すため。
     """
-    body, final_url = _fetch(client, url, MAX_PAGE_BYTES)
-    return html_to_text(body.decode("utf-8", errors="replace"), limit, final_url.fragment)
+    html, final_url = page
+    return html_to_text(html, limit, final_url.fragment)
+
+
+def fetch_page_text(client: httpx.Client, url: str, limit: int) -> str:
+    """記事ページを取得し、本文の文字を最大 limit 文字で返す。"""
+    return page_text(fetch_page(client, url), limit)
 
 
 def _read_limited(response: httpx.Response, url: str, max_bytes: int) -> bytes:
@@ -177,14 +188,9 @@ def parse_feed(body: bytes, source: str) -> list[FeedItem]:
     return items
 
 
-def fetch_page_date(client: httpx.Client, url: str) -> datetime | None:
-    """記事ページの構造化データから公開日時を読む。取得できないか、日付がなければ None。"""
-    try:
-        body = fetch_url(client, url, MAX_PAGE_BYTES)
-    except FeedError as error:
-        logger.warning("could not read the publication date of %s: %s", url, error)
-        return None
-    return published_at_from_html(body.decode("utf-8", errors="replace"))
+def page_date(page: tuple[str, httpx.URL]) -> datetime | None:
+    """取得したページの構造化データから公開日時を読む。日付がなければ None。"""
+    return published_at_from_html(page[0])
 
 
 def _is_web_url(url: str) -> bool:
