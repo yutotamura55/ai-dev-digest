@@ -100,9 +100,11 @@ def _fetch(client: httpx.Client, url: str, max_bytes: int) -> tuple[bytes, httpx
             with client.stream("GET", **_pinned_request(target, address)) as response:
                 if response.is_redirect:
                     # 相対の Location は、接続先の IP ではなく元の URL を基準に解決する。
-                    # Location にフラグメントがなければ、元のフラグメントを引き継ぐ (RFC 9110)。
-                    location = target.join(response.headers.get("location", ""))
-                    if not location.fragment:
+                    # Location に # がなければ元のフラグメントを引き継ぐ (RFC 9110)。
+                    # "/moved#" のように空でも # があれば、フラグメントを消す指示として扱う。
+                    raw_location = response.headers.get("location", "")
+                    location = target.join(raw_location)
+                    if "#" not in raw_location:
                         location = location.copy_with(fragment=target.fragment or None)
                     target = location
                     continue

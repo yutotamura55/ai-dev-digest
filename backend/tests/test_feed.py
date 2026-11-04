@@ -199,6 +199,20 @@ def test_fetch_page_text_keeps_the_fragment_when_the_redirect_has_none() -> None
         assert fetch_page_text(client, "https://example.com/notes#y", limit=100) == "Y\ny"
 
 
+def test_fetch_page_text_drops_the_fragment_when_the_redirect_clears_it() -> None:
+    html = b'<main><h3 id="y">Y</h3><p>y</p><h3 id="z">Z</h3><p>z</p></main>'
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(original_url(request))
+        if len(seen) == 1:
+            return httpx.Response(302, headers={"Location": "/moved#"})
+        return httpx.Response(200, content=html)
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        assert fetch_page_text(client, "https://example.com/notes#y", limit=100) == "Y\ny\nZ\nz"
+
+
 def test_fetch_page_text_cuts_at_the_limit() -> None:
     with client_returning(httpx.Response(200, content=b"<p>abcdef</p>")) as client:
         assert fetch_page_text(client, "https://example.com/post", limit=3) == "abc"

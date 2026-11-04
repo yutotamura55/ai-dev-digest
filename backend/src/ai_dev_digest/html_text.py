@@ -42,10 +42,10 @@ class _TextExtractor(HTMLParser):
     """HTML から文字を集める。
 
     fragment を渡すと、その id (または a 要素の name) を持つ要素から始まる節の文字も別に集める。
-    節の終わりは、id が見出し (h1〜h6) にあれば同じか上の階層の次の見出し、ほかの要素にあれば
-    その要素の終了タグ。空のアンカー (`<a name="x"></a>`) のように要素に文字がなければ、
-    その後に続く最初の見出しを節の見出しとみなして続ける。article か main の中で始まった節は、
-    その外には出ない。
+    節の終わりは、id が見出し (h1〜h6) かその中の要素にあれば同じか上の階層の次の見出し、
+    ほかの要素にあればその要素の終了タグ。空のアンカー (`<a name="x"></a>`) のように要素に
+    文字がなければ、その後に続く最初の見出しを節の見出しとみなして続ける。article か main の
+    中で始まった節は、その要素の外には出ない。除外する要素 (nav など) の中の見出しや id は見ない。
     リリースノートのように 1 ページに日付ごとの節が並ぶページの URL (`overview#november-3-2026`)
     から、その日の分だけを取り出すために使う。
     """
@@ -65,7 +65,10 @@ class _TextExtractor(HTMLParser):
         self._container_depth = 0
         # 空の要素から始まった節が、次の見出しを自分の見出しとして待っている。
         self._adopt_next_heading = False
-        self._section_in_body = False
+        # 節が始まったときの article/main の深さ。その要素が閉じたら節を終える。
+        self._section_body_depth = 0
+        # いま開いている見出しの階層 (0 なら見出しの外)。見出しの中の要素に id があるときに使う。
+        self._open_heading = 0
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         if tag in SKIPPED_TAGS:
@@ -74,37 +77,55 @@ class _TextExtractor(HTMLParser):
             self._body_depth += 1
         elif tag in BLOCK_TAGS:
             self._append("\n")
-        if self._in_section and tag in HEADING_TAGS and self._adopt_next_heading:
-            self._adopt_next_heading = False
-            self._section_level = int(tag[1])
-        elif self._in_section and tag in HEADING_TAGS and self._container_depth == 0:
-            if int(tag[1]) <= self._section_level:
-                self._in_section = False
-        elif self._in_section and self._container_depth and tag not in VOID_TAGS:
-            self._container_depth += 1
+        if self._skip_depth:
+            # 除外する要素の中の見出しや id は、節の境界にも始まりにもしない。
+            return
+        if tag in HEADING_TAGS:
+            self._open_heading = int(tag[1])
+        if self._in_section:
+            self._update_section_boundary(tag)
         if self._matches(tag, attrs):
             self._start_section(tag)
+
+    def _update_section_boundary(self, tag: str) -> None:
+        """節の中で開始タグを見たとき、節を終えるか、深さや見出しの階層を更新する。"""
+        if tag in HEADING_TAGS and self._adopt_next_heading:
+            self._adopt_next_heading = False
+            self._section_level = int(tag[1])
+        elif tag in HEADING_TAGS and self._container_depth == 0:
+            if int(tag[1]) <= self._section_level:
+                self._in_section = False
+        elif self._container_depth and tag not in VOID_TAGS:
+            self._container_depth += 1
 
     def _matches(self, tag: str, attrs: list[tuple[str, str | None]]) -> bool:
         """fragment の要素か。除外する要素の中は見ない。
 
         同じ id が先にあっても (目次など)、見出しに付いた id が後から来れば、そちらから節を始める。
         """
-        if self._fragment is None or self._skip_depth:
+        if self._fragment is None:
             return False
-        if self._section and (self._section_from_heading or tag not in HEADING_TAGS):
+        if self._section and (self._section_from_heading or not self._heading_level(tag)):
             return False
         names = ("id", "name") if tag == "a" else ("id",)
         return any(name in names and value == self._fragment for name, value in attrs)
 
+    def _heading_level(self, tag: str) -> int:
+        """見出しか、見出しの中の要素なら、その見出しの階層。そうでなければ 0。"""
+        if tag in HEADING_TAGS:
+            return int(tag[1])
+        return self._open_heading
+
     def _start_section(self, tag: str) -> None:
         self._section = []
         self._in_section = True
-        self._section_in_body = self._body_depth > 0
-        self._section_from_heading = tag in HEADING_TAGS
+        self._section_body_depth = self._body_depth
         self._adopt_next_heading = False
-        if tag in HEADING_TAGS:
-            self._section_level = int(tag[1])
+        level = self._heading_level(tag)
+        self._section_from_heading = level > 0
+        if level:
+            # 見出し (または見出しの中のアンカー) から始まる節。同じか上の階層の次の見出しで終える。
+            self._section_level = level
             self._container_depth = 0
         else:
             self._section_level = BELOW_ALL_HEADINGS
@@ -117,10 +138,14 @@ class _TextExtractor(HTMLParser):
             self._skip_depth = max(0, self._skip_depth - 1)
         elif tag in BODY_TAGS:
             self._body_depth = max(0, self._body_depth - 1)
-            if self._section_in_body and self._body_depth == 0:
+            if self._in_section and self._body_depth < self._section_body_depth:
                 self._in_section = False
         elif tag in BLOCK_TAGS:
             self._append("\n")
+        if self._skip_depth:
+            return
+        if tag in HEADING_TAGS:
+            self._open_heading = 0
         if self._in_section and self._container_depth and tag not in VOID_TAGS:
             self._container_depth -= 1
             if self._container_depth == 0:

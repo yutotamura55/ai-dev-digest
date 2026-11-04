@@ -112,6 +112,31 @@ def test_fragment_inside_a_skipped_element_is_ignored() -> None:
     assert html_to_text(html, 500, "top") == html_to_text(html, 500)
 
 
+def test_headings_inside_skipped_elements_do_not_end_the_section() -> None:
+    html = (
+        '<main><h3 id="x">X</h3><p>one</p><nav><h2>Navigation</h2></nav><p>two</p><h3>Y</h3></main>'
+    )
+
+    assert html_to_text(html, 500, "x") == "X\none\ntwo"
+
+
+def test_fragment_on_an_anchor_inside_a_heading_uses_that_heading_as_the_section() -> None:
+    empty = '<h3><a id="x"></a>X</h3><p>today</p><h3>Y</h3><p>yesterday</p>'
+    filled = '<h3><a id="x">X</a></h3><p>today</p><h3>Y</h3><p>yesterday</p>'
+
+    assert html_to_text(empty, 500, "x") == "X\ntoday"
+    assert html_to_text(filled, 500, "x") == "X\ntoday"
+
+
+def test_fragment_section_does_not_leave_an_article_nested_in_main() -> None:
+    html = (
+        '<main><article><h3 id="x">X</h3><p>body</p></article>'
+        "<aside>Unrelated sidebar</aside></main>"
+    )
+
+    assert html_to_text(html, 500, "x") == "X\nbody"
+
+
 def test_fragment_prefers_the_heading_over_an_earlier_duplicate_id() -> None:
     html = (
         '<div class="toc"><a id="d3">Nov 3</a><a id="d2">Nov 2</a></div>'
