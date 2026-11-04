@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from ai_dev_digest.html_text import html_to_text
 
 
@@ -57,16 +59,66 @@ def test_fragment_section_ends_at_a_higher_heading_but_includes_lower_ones() -> 
     assert html_to_text(html, 500, "a") == "A\na1\nA detail\na2"
 
 
-def test_fragment_on_a_non_heading_element_ends_at_the_next_heading() -> None:
+def test_fragment_on_a_non_heading_element_ends_at_its_end_tag() -> None:
     html = '<p>intro</p><div id="note"><p>note 1</p></div><p>note 2</p><h3>Next</h3><p>after</p>'
 
-    assert html_to_text(html, 500, "note") == "note 1\nnote 2"
+    assert html_to_text(html, 500, "note") == "note 1"
 
 
-def test_fragment_not_found_or_empty_falls_back_to_the_whole_page() -> None:
+def test_fragment_on_an_empty_anchor_adopts_the_next_heading() -> None:
+    html = (
+        '<p>intro</p><a id="d3"></a><h3>Nov 3</h3><p>today</p><h4>Detail</h4><p>d</p><h3>Nov 2</h3>'
+    )
+
+    assert html_to_text(html, 500, "d3") == "Nov 3\ntoday\nDetail\nd"
+
+
+def test_fragment_not_found_or_empty_falls_back_to_the_whole_page(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     assert html_to_text(RELEASE_NOTES, 500, "december-1-2026") == html_to_text(RELEASE_NOTES, 500)
+    assert "fragment #december-1-2026 not found" in caplog.text
     assert html_to_text(RELEASE_NOTES, 500, "") == html_to_text(RELEASE_NOTES, 500)
     assert html_to_text(RELEASE_NOTES, 500).startswith("Release notes\nNovember 3, 2026")
+
+
+def test_fragment_on_a_container_ends_at_its_end_tag_even_with_headings_inside() -> None:
+    html = (
+        '<main><section id="d3"><h3>Nov 3</h3><p>today<br>more</p></section>'
+        '<section id="d2"><h3>Nov 2</h3><p>old</p></section></main>'
+    )
+
+    assert html_to_text(html, 500, "d3") == "Nov 3\ntoday\nmore"
+
+
+def test_fragment_section_does_not_leave_the_main_element() -> None:
+    html = (
+        '<main><h3 id="d3">Nov 3</h3><p>today</p></main>'
+        "<aside><p>Was this helpful?</p><div>cookie banner</div></aside>"
+    )
+
+    assert html_to_text(html, 500, "d3") == "Nov 3\ntoday"
+
+
+def test_fragment_matches_the_name_of_an_anchor() -> None:
+    html = '<p>intro</p><a name="2026-11-03"></a><h3>Nov 3</h3><p>today</p><h3>Nov 2</h3>'
+
+    assert html_to_text(html, 500, "2026-11-03") == "Nov 3\ntoday"
+
+
+def test_fragment_inside_a_skipped_element_is_ignored() -> None:
+    html = '<header><h1 id="top">Title</h1></header><p>intro</p><h2>Next</h2>'
+
+    assert html_to_text(html, 500, "top") == html_to_text(html, 500)
+
+
+def test_fragment_prefers_the_heading_over_an_earlier_duplicate_id() -> None:
+    html = (
+        '<div class="toc"><a id="d3">Nov 3</a><a id="d2">Nov 2</a></div>'
+        '<h3 id="d3">November 3</h3><p>today</p><h3 id="d2">November 2</h3><p>old</p>'
+    )
+
+    assert html_to_text(html, 500, "d3") == "November 3\ntoday"
 
 
 def test_fragment_section_skips_scripts_and_cuts_at_the_limit() -> None:

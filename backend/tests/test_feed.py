@@ -169,6 +169,36 @@ def test_fetch_page_text_uses_the_fragment_of_the_url_to_pick_the_section() -> N
     assert text == "Nov 3\ntoday"
 
 
+def test_fetch_page_text_uses_the_fragment_of_the_redirect_target() -> None:
+    html = b'<h3 id="november-3-2026">Nov 3</h3><p>today</p><h3 id="x">X</h3><p>x</p>'
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(original_url(request))
+        if len(seen) == 1:
+            return httpx.Response(302, headers={"Location": "/notes/overview#november-3-2026"})
+        return httpx.Response(200, content=html)
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        text = fetch_page_text(client, "https://example.com/notes#nov-3", limit=100)
+
+    assert text == "Nov 3\ntoday"
+
+
+def test_fetch_page_text_keeps_the_fragment_when_the_redirect_has_none() -> None:
+    html = b'<h3 id="x">X</h3><p>x</p><h3 id="y">Y</h3><p>y</p>'
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(original_url(request))
+        if len(seen) == 1:
+            return httpx.Response(302, headers={"Location": "/moved"})
+        return httpx.Response(200, content=html)
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        assert fetch_page_text(client, "https://example.com/notes#y", limit=100) == "Y\ny"
+
+
 def test_fetch_page_text_cuts_at_the_limit() -> None:
     with client_returning(httpx.Response(200, content=b"<p>abcdef</p>")) as client:
         assert fetch_page_text(client, "https://example.com/post", limit=3) == "abc"
