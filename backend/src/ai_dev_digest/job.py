@@ -142,6 +142,7 @@ def run(
             continue
         article = Article(
             title=entry.title,
+            title_ja=summary.title_ja,
             url=entry.url,
             source=entry.source,
             published_at=entry.published_at,

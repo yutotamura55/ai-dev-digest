@@ -41,6 +41,8 @@ class FeedEntry(BaseModel):
 class Summary(BaseModel):
     """LLM が生成した日本語の要約。"""
 
+    # 題名の日本語訳。固有名詞は原文のまま。
+    title_ja: str
     # 2〜3 文の短い要約。
     summary_ja: str
     # 箇条書きの詳細。
@@ -51,6 +53,8 @@ class Article(BaseModel):
     """Firestore に保存し、API が返す 1 件の記事。"""
 
     title: str
+    # 題名の日本語訳。#14 より前に保存した記事にはないので、空なら画面は原文の題名だけを出す。
+    title_ja: str = ""
     url: str
     source: str
     published_at: datetime

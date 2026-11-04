@@ -126,13 +126,18 @@ def test_judge_returns_nothing_for_no_entries() -> None:
 
 
 def test_summarize_returns_the_japanese_summary() -> None:
-    summary = {"summary_ja": "要約です。", "detail_ja": ["点 1", "点 2"]}
+    summary = {
+        "title_ja": "新しいモデル",
+        "summary_ja": "要約です。",
+        "detail_ja": ["点 1", "点 2"],
+    }
     llm, requests = summarizer(
         lambda _body: httpx2.Response(200, json=message(json.dumps(summary)))
     )
 
     result = llm.summarize(entry(title="New model"), "x" * (SUMMARY_INPUT_CHARS + 100))
 
+    assert result.title_ja == "新しいモデル"
     assert result.summary_ja == "要約です。"
     assert result.detail_ja == ["点 1", "点 2"]
     [record] = articles_in(requests[0])
@@ -141,7 +146,9 @@ def test_summarize_returns_the_japanese_summary() -> None:
     # 本文は上限で切って渡す。
     assert record["body"] == "x" * SUMMARY_INPUT_CHARS
     assert "信頼できないデータ" in requests[0]["system"]
+    assert "title_ja" in requests[0]["system"]
     assert requests[0]["output_config"]["effort"] == "medium"
+    assert "title_ja" in requests[0]["output_config"]["format"]["schema"]["required"]
     assert requests[0]["output_config"]["format"]["type"] == "json_schema"
 
 

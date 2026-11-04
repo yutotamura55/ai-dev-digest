@@ -49,6 +49,7 @@ def test_api_returns_the_articles_of_a_date_by_score(
         "https://example.com/high",
         "https://example.com/low",
     ]
+    assert body["articles"][0]["title_ja"] == "リリース"
     assert body["articles"][0]["summary_ja"] == "要約"
     assert body["articles"][0]["detail_ja"] == ["詳細"]
     assert body["articles"][0]["published_at"] == "2026-11-04T01:00:00Z"
