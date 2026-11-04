@@ -16,7 +16,13 @@ import httpx
 from google.cloud import firestore
 
 from ai_dev_digest.feed import FeedError, fetch_feed, fetch_page_text, parse_feed
-from ai_dev_digest.llm import DEFAULT_MODEL, ClaudeSummarizer, LLMError, Summarizer
+from ai_dev_digest.llm import (
+    DEFAULT_MODEL,
+    SUMMARY_INPUT_CHARS,
+    ClaudeSummarizer,
+    LLMError,
+    Summarizer,
+)
 from ai_dev_digest.models import Article, FeedEntry, date_jst
 from ai_dev_digest.sources import SOURCES, Source
 from ai_dev_digest.store import ArticleStore, FirestoreArticleStore
@@ -24,9 +30,9 @@ from ai_dev_digest.store import ArticleStore, FirestoreArticleStore
 logger = logging.getLogger(__name__)
 
 DEFAULT_LIMIT = 10
-DEFAULT_WINDOW = timedelta(hours=24)
-# 記事ページから要約に渡す本文の文字数。
-PAGE_TEXT_CHARS = 12_000
+# 新着とみなす公開日時の範囲。実行の間隔 (1 日) より長くし、実行の遅れや失敗で記事を取りこぼさない
+# ようにする。保存済みの記事は選別の前に除くので、重なった分を 2 回保存することはない。
+DEFAULT_WINDOW = timedelta(hours=48)
 USER_AGENT = "ai-dev-digest (+https://github.com/yutotamura55/ai-dev-digest)"
 
 
@@ -75,7 +81,7 @@ def article_body(client: httpx.Client, source: Source, entry: FeedEntry) -> str:
     if not source.fetch_body:
         return entry.content
     try:
-        text = fetch_page_text(client, entry.url, PAGE_TEXT_CHARS)
+        text = fetch_page_text(client, entry.url, SUMMARY_INPUT_CHARS)
     except FeedError as error:
         logger.warning("using the feed content for %s: %s", entry.url, error)
         return entry.content
@@ -92,12 +98,21 @@ def run(
     window: timedelta = DEFAULT_WINDOW,
     limit: int = DEFAULT_LIMIT,
 ) -> Result:
-    """新着を集め、保存済みを除き、LLM で選別して上位 limit 件を要約・保存する。"""
+    """新着を集め、保存済みを除き、LLM で選別して、その日の記事が limit 件になるまで要約・保存する。
+
+    limit は日本時間の日付ごとの上限。同じ日に 2 回実行しても、合計で limit 件を超えない。
+    """
     if limit < 1:
         raise ValueError(f"the limit must be 1 or more: {limit}")
     now = now or datetime.now(UTC)
+    today = date_jst(now)
     by_name = {source.name: source for source in sources}
     result = Result()
+
+    remaining = limit - len(store.by_date(today))
+    if remaining <= 0:
+        logger.info("%s already has %d article(s); nothing to do", today, limit)
+        return result
 
     entries, result.failed_sources = collect_entries(client, sources, now, window)
     known = store.existing_ids(entry.id for entry in entries)
@@ -112,7 +127,10 @@ def run(
     relevant.sort(key=lambda entry: (-scores[entry.url], entry.url))
     result.relevant = len(relevant)
 
-    for entry in relevant[:limit]:
+    # 要約に失敗した記事は飛ばし、次の候補で埋める。
+    for entry in relevant:
+        if result.saved >= remaining:
+            break
         body = article_body(client, by_name[entry.source], entry)
         try:
             summary = summarizer.summarize(entry, body)
@@ -126,7 +144,7 @@ def run(
             source=entry.source,
             published_at=entry.published_at,
             fetched_at=now,
-            fetched_date_jst=date_jst(now),
+            fetched_date_jst=today,
             summary_ja=summary.summary_ja,
             detail_ja=summary.detail_ja,
             score=scores[entry.url],
@@ -152,6 +170,9 @@ def main() -> None:
     MAX_ARTICLES_PER_DAY: 1 回に保存する記事の上限 (既定は 10)。
     """
     logging.basicConfig(level=logging.INFO)
+    # SDK はキーがなくても作れ、最初の呼び出しで失敗する。フィードを取得する前に確かめる。
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        raise SystemExit("ANTHROPIC_API_KEY is not set (see .env.example)")
     model = os.environ.get("LLM_MODEL", DEFAULT_MODEL)
     limit = int(os.environ.get("MAX_ARTICLES_PER_DAY", str(DEFAULT_LIMIT)))
     summarizer = ClaudeSummarizer(anthropic.Anthropic(), model=model)

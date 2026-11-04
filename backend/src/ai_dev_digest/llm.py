@@ -64,7 +64,10 @@ class Summarizer(Protocol):
     """記事の選別と要約。テストでは同じ形の偽物に差し替える。"""
 
     def judge(self, entries: Sequence[FeedEntry]) -> dict[str, int]:
-        """モデル・API・料金・廃止予定に関わる項目について、URL ごとのスコアを返す。"""
+        """モデル・API・料金・廃止予定に関わる項目について、URL ごとのスコアを返す。
+
+        判定できなかった項目 (呼び出しの失敗など) は結果に含めない。例外は投げない。
+        """
         ...
 
     def summarize(self, entry: FeedEntry, body: str) -> Summary:
@@ -83,7 +86,11 @@ class ClaudeSummarizer:
         scores: dict[str, int] = {}
         for start in range(0, len(entries), JUDGE_BATCH_SIZE):
             batch = entries[start : start + JUDGE_BATCH_SIZE]
-            scores.update(self._judge_batch(batch))
+            try:
+                scores.update(self._judge_batch(batch))
+            except LLMError as error:
+                # 失敗した分は次の実行で判定し直す (保存していないので、窓の中なら候補に戻る)。
+                logger.warning("skipping %d candidate(s): %s", len(batch), error)
         return scores
 
     def _judge_batch(self, entries: Sequence[FeedEntry]) -> dict[str, int]:

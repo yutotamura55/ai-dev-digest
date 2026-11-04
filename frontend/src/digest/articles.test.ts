@@ -54,7 +54,11 @@ describe("formatTimeInTokyo", () => {
 });
 
 describe("fetchDigest", () => {
-  const digest: DayDigest = { date: "2026-11-04", articles: [] };
+  const digest: DayDigest = {
+    date: "2026-11-04",
+    today: "2026-11-04",
+    articles: [],
+  };
 
   it("asks the API for today when no date is given", async () => {
     const fetcher = async (input: RequestInfo | URL) => {

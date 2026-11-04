@@ -49,6 +49,23 @@ def test_parse_feed_takes_the_longer_of_content_and_summary_as_text(feed_body: b
     assert entries[1].content == "Plain text summary."
 
 
+def test_parse_feed_compares_content_and_summary_after_removing_tags() -> None:
+    body = (
+        b'<?xml version="1.0"?><rss version="2.0" '
+        b'xmlns:content="http://purl.org/rss/1.0/modules/content/"><channel><item>'
+        b"<title>T</title><link>https://example.com/t</link>"
+        b"<pubDate>Tue, 03 Nov 2026 09:00:00 GMT</pubDate>"
+        b"<description>A long plain summary that says more than the body.</description>"
+        b'<content:encoded><![CDATA[<div class="a"><span style="color:red">Short.</span>'
+        b"<script>var padding = 'x'.repeat(1000);</script></div>]]></content:encoded>"
+        b"</item></channel></rss>"
+    )
+
+    entries = parse_feed(body, source=SOURCE)
+
+    assert entries[0].content == "A long plain summary that says more than the body."
+
+
 def test_parse_feed_rejects_a_body_that_is_not_a_feed() -> None:
     with pytest.raises(FeedError):
         parse_feed(b"<html><p>not a feed", source=SOURCE)

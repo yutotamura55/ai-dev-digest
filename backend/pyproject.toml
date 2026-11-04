@@ -16,6 +16,8 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    # anthropic SDK の HTTP ライブラリ。テストで偽の応答 (MockTransport) を作るために直接使う。
+    "httpx2>=2.16.0",
     "mypy>=2.4.1",
     "pip-audit>=2.10.1",
     "pytest>=9.2.0",
@@ -66,7 +68,7 @@ show_missing = true
 skip_covered = true
 # 測った値を小数第 2 位で切り捨てて書く。coverage は合計を下限の桁数に丸めてから比べるため、
 # 四捨五入した値 (97.647 → 97.65) を書くと、下限ちょうどとみなされて成功する。
-fail_under = 99.12
+fail_under = 99.16
 
 [tool.vulture]
 paths = ["src", "tests"]

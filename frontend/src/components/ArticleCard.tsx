@@ -32,8 +32,9 @@ export function ArticleCard({ article }: { article: Article }) {
       {open && (
         <div className="card-detail">
           <ul>
-            {article.detail_ja.map((line) => (
-              <li key={line}>{line}</li>
+            {/* LLM が同じ文を 2 回返すことがあるので、番号を key にする。 */}
+            {article.detail_ja.map((line, index) => (
+              <li key={index}>{line}</li>
             ))}
           </ul>
           <a href={article.url} target="_blank" rel="noopener noreferrer">

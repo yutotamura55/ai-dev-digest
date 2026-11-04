@@ -133,8 +133,8 @@ def _published_at(entry: Any) -> datetime | None:
 
 
 def _content(entry: Any) -> str:
-    """項目の本文 (content) か概要 (summary) の文字。長い方を使う。"""
+    """項目の本文 (content) か概要 (summary) の文字。タグを除いた上で長い方を使う。"""
     candidates = [str(item.get("value", "")) for item in entry.get("content") or []]
     candidates.append(str(entry.get("summary", "")))
-    longest = max(candidates, key=len)
-    return html_to_text(longest, MAX_CONTENT_CHARS)
+    texts = (html_to_text(candidate, MAX_CONTENT_CHARS) for candidate in candidates)
+    return max(texts, key=len)

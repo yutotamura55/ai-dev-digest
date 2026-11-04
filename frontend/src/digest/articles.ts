@@ -13,8 +13,9 @@ export type Article = {
 };
 
 export type DayDigest = {
-  // YYYY-MM-DD (日本時間)。
+  // YYYY-MM-DD (日本時間)。today は API が決めた今日の日付。
   date: string;
+  today: string;
   articles: Article[];
 };
 

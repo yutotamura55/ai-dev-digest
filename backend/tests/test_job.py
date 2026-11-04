@@ -155,6 +155,53 @@ def test_run_does_not_fetch_the_page_when_the_source_forbids_it() -> None:
     assert requested == [OPENAI.feed_url]
 
 
+def test_run_fills_the_limit_from_the_next_candidate_when_a_summary_fails() -> None:
+    feed = rss(
+        [
+            item("Big model A", "https://openai.example/a", RECENT),
+            item("Model B", "https://openai.example/b", RECENT),
+            item("Model C", "https://openai.example/c", RECENT),
+        ]
+    )
+    client, _ = routing_client({OPENAI.feed_url: feed})
+    store = FakeArticleStore()
+    summarizer = FakeSummarizer(
+        scores={"model": 50, "big": 90}, failing_urls=["https://openai.example/a"]
+    )
+
+    result = job.run(client, store, summarizer, [OPENAI], now=NOW, limit=1)
+
+    assert result.saved == 1
+    assert result.failed_articles == ["https://openai.example/a"]
+    assert [a.url for a in store.articles.values()] == ["https://openai.example/b"]
+    # 上限に達したら、残りの候補は要約しない。
+    assert [e.url for e, _ in summarizer.summarized] == [
+        "https://openai.example/a",
+        "https://openai.example/b",
+    ]
+
+
+def test_run_counts_the_limit_per_japan_date_across_runs() -> None:
+    feed = rss(
+        [
+            item("Model A", "https://openai.example/a", RECENT),
+            item("Model B", "https://openai.example/b", RECENT),
+            item("Model C", "https://openai.example/c", RECENT),
+        ]
+    )
+    client, _ = routing_client({OPENAI.feed_url: feed})
+    store = FakeArticleStore()
+    summarizer = FakeSummarizer()
+
+    assert job.run(client, store, summarizer, [OPENAI], now=NOW, limit=2).saved == 2
+    # 同じ日の 2 回目は、残りの 1 枠だけ埋める。3 回目は何もせず、LLM も呼ばない。
+    later = NOW + timedelta(hours=3)
+    assert job.run(client, store, summarizer, [OPENAI], now=later, limit=3).saved == 1
+    assert job.run(client, store, summarizer, [OPENAI], now=later, limit=3).saved == 0
+    assert len(summarizer.judged) == 2
+    assert len(store.by_date("2026-11-04")) == 3
+
+
 def test_run_stops_before_the_llm_when_there_is_nothing_new() -> None:
     client, _ = routing_client(
         {OPENAI.feed_url: rss([item("Model C", "https://openai.example/c", OLD)])}
@@ -174,6 +221,13 @@ def test_run_rejects_a_limit_below_one(limit: int) -> None:
         job.run(client, FakeArticleStore(), FakeSummarizer(), [OPENAI], now=NOW, limit=limit)
 
 
+def test_main_stops_early_when_the_api_key_is_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+
+    with pytest.raises(SystemExit, match="ANTHROPIC_API_KEY"):
+        job.main()
+
+
 def test_main_reads_settings_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: dict[str, object] = {}
 
@@ -183,6 +237,7 @@ def test_main_reads_settings_from_the_environment(monkeypatch: pytest.MonkeyPatc
         calls["summarizer"] = summarizer
         calls.update(kwargs)
 
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setenv("LLM_MODEL", "claude-haiku-5-5")
     monkeypatch.setenv("MAX_ARTICLES_PER_DAY", "3")
     monkeypatch.setattr("ai_dev_digest.job.run", fake_run)

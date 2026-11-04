@@ -24,5 +24,5 @@ async function TodayDigest() {
   const apiBaseUrl = process.env.API_BASE_URL ?? "http://localhost:8000";
   // 今日の日付は API が日本時間で決める。画面とジョブで日付の区切りをそろえるため。
   const digest = await fetchDigest(apiBaseUrl);
-  return <DigestView digest={digest} isToday />;
+  return <DigestView digest={digest} />;
 }

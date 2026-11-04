@@ -43,6 +43,7 @@ def test_api_returns_the_articles_of_a_date_by_score(
     assert response.status_code == 200
     body = response.json()
     assert body["date"] == "2026-11-03"
+    assert body["today"] == date_jst(datetime.now(UTC))
     assert [a["url"] for a in body["articles"]] == [
         "https://example.com/high",
         "https://example.com/low",
@@ -59,14 +60,15 @@ def test_api_defaults_to_today_in_japan_time(store: FakeArticleStore, api: TestC
     body = api.get("/articles").json()
 
     assert body["date"] == today
+    assert body["today"] == today
     assert len(body["articles"]) == 1
 
 
 def test_api_returns_an_empty_list_for_a_day_without_articles(api: TestClient) -> None:
-    assert api.get("/articles", params={"date": "2000-01-01"}).json() == {
-        "date": "2000-01-01",
-        "articles": [],
-    }
+    body = api.get("/articles", params={"date": "2000-01-01"}).json()
+
+    assert body["date"] == "2000-01-01"
+    assert body["articles"] == []
 
 
 @pytest.mark.parametrize("value", ["2026-13-01", "2026-11-4", "abc", "2026-11-03T00:00"])

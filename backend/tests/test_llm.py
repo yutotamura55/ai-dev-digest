@@ -88,6 +88,25 @@ def test_judge_splits_many_entries_into_batches() -> None:
     assert len(requests) == 2
 
 
+def test_judge_keeps_the_batches_that_succeeded_when_one_fails() -> None:
+    calls = 0
+
+    def respond(body: dict[str, Any]) -> httpx2.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return httpx2.Response(500, json={"type": "error", "error": {}})
+        count = body["messages"][0]["content"].count("\n題名: ")
+        items = [{"index": i, "relevant": True, "score": 1} for i in range(count)]
+        return httpx2.Response(200, json=message(json.dumps({"items": items})))
+
+    llm, _ = summarizer(respond)
+    entries = [entry(url=f"https://example.com/{i}") for i in range(JUDGE_BATCH_SIZE + 1)]
+
+    # 1 つ目のバッチ (40 件) は失敗し、2 つ目 (1 件) だけが結果に残る。
+    assert llm.judge(entries) == {f"https://example.com/{JUDGE_BATCH_SIZE}": 1}
+
+
 def test_judge_returns_nothing_for_no_entries() -> None:
     llm, requests = summarizer(lambda _body: httpx2.Response(500))
 

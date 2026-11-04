@@ -25,5 +25,5 @@ async function DayDigest({ date }: { date: string }) {
   await connection();
   const apiBaseUrl = process.env.API_BASE_URL ?? "http://localhost:8000";
   const digest = await fetchDigest(apiBaseUrl, date);
-  return <DigestView digest={digest} isToday={false} />;
+  return <DigestView digest={digest} />;
 }
