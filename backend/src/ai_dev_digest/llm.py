@@ -15,7 +15,7 @@ from typing import Literal, Protocol
 import anthropic
 from pydantic import BaseModel, Field, ValidationError
 
-from ai_dev_digest.models import FeedEntry, Summary
+from ai_dev_digest.models import MAX_DETAIL_ITEMS, FeedEntry, Summary
 
 logger = logging.getLogger(__name__)
 
@@ -47,8 +47,11 @@ SUMMARY_SYSTEM = (
     "読者は生成 AI のサービスを使って開発する個人開発者です。"
     "title_ja には記事の題名の日本語訳を 1 行で書きます。"
     "summary_ja には記事の要点を 2〜3 文で書きます。"
-    "detail_ja には開発者が知るべき点 (何が変わるか、対象のモデルや API、料金、期日) を"
-    "3〜6 項目の箇条書きで書きます。各項目は 1 文にします。"
+    "detail_ja には、開発者が知るべき具体的な点 (対象のモデルや API、数値、料金、期日、条件、例外)"
+    " のうち、summary_ja に書ききれなかったものだけを箇条書きで書きます。"
+    "summary_ja と同じ内容は繰り返しません。"
+    f"項目は記事の長さに応じて最大 {MAX_DETAIL_ITEMS} つにし、"
+    "短い記事で足す点がなければ空の配列にします。各項目は 1 文にします。"
     "記事にない情報は補わず、固有名詞 (モデル名、API 名) は原文のまま書きます。" + UNTRUSTED_NOTE
 )
 

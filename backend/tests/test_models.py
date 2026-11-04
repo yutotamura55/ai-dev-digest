@@ -4,7 +4,7 @@ from datetime import timedelta
 
 import pytest
 
-from ai_dev_digest.models import Article, Summary, date_jst
+from ai_dev_digest.models import MAX_DETAIL_ITEMS, Article, Summary, date_jst
 from tests.conftest import NOW, article
 
 
@@ -28,3 +28,22 @@ def test_summary_title_ja_is_one_line_and_not_empty() -> None:
     assert summary.title_ja == "新しい モデル"
     with pytest.raises(ValueError, match="title_ja"):
         Summary(title_ja=" \n ", summary_ja="s", detail_ja=[])
+
+
+def test_summary_detail_ja_cleans_items_and_cuts_at_the_maximum(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    items = [f"点 {i}" for i in range(MAX_DETAIL_ITEMS + 2)]
+    summary = Summary(title_ja="t", summary_ja="s", detail_ja=[" ", *items])
+
+    assert summary.detail_ja == items[:MAX_DETAIL_ITEMS]
+    assert f"detail_ja has {MAX_DETAIL_ITEMS + 2} items; keeping {MAX_DETAIL_ITEMS}" in caplog.text
+    assert Summary(title_ja="t", summary_ja="s", detail_ja=[]).detail_ja == []
+
+
+def test_summary_detail_ja_normalizes_whitespace_and_removes_duplicates() -> None:
+    summary = Summary(
+        title_ja="t", summary_ja="s", detail_ja=["  料金は\n$2。 ", "料金は $2。", "期日は 11 月。"]
+    )
+
+    assert summary.detail_ja == ["料金は $2。", "期日は 11 月。"]

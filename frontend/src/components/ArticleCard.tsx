@@ -14,6 +14,29 @@ export function ArticleCard({ article }: { article: Article }) {
   const [open, setOpen] = useState(false);
   const toggle = () => setOpen((value) => !value);
   const titles = cardTitles(article);
+  const originalLink = (
+    <a href={article.url} target="_blank" rel="noopener noreferrer">
+      原文を読む ({hostnameOf(article.url)})
+    </a>
+  );
+  // 短い記事では詳細が空のことがある (#18)。そのときは開閉せず、原文へのリンクだけを出す。
+  if (article.detail_ja.length === 0) {
+    return (
+      <article className="card">
+        <div className="card-head card-head-static">
+          <h3>{titles.heading}</h3>
+          {titles.original !== null && (
+            <p className="card-original-title">{titles.original}</p>
+          )}
+          <p className="card-meta">
+            {article.source} · {formatTimeInTokyo(article.published_at)}
+          </p>
+          <p>{article.summary_ja}</p>
+          <p className="card-link">{originalLink}</p>
+        </div>
+      </article>
+    );
+  }
   return (
     <article className={open ? "card card-open" : "card"}>
       {/* カード全体で開閉できるようにし、キーボードにはボタンで応える。 */}
@@ -41,14 +64,12 @@ export function ArticleCard({ article }: { article: Article }) {
       {open && (
         <div className="card-detail">
           <ul>
-            {/* LLM が同じ文を 2 回返すことがあるので、番号を key にする。 */}
+            {/* #18 より前に保存した記事には同じ文が 2 回あることがあるので、番号を key にする。 */}
             {article.detail_ja.map((line, index) => (
               <li key={index}>{line}</li>
             ))}
           </ul>
-          <a href={article.url} target="_blank" rel="noopener noreferrer">
-            原文を読む ({hostnameOf(article.url)})
-          </a>
+          {originalLink}
         </div>
       )}
     </article>
