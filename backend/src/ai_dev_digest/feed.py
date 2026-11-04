@@ -121,9 +121,13 @@ def fetch_feed(client: httpx.Client, url: str) -> bytes:
 
 
 def fetch_page_text(client: httpx.Client, url: str, limit: int) -> str:
-    """記事ページを取得し、本文の文字を最大 limit 文字で返す。"""
+    """記事ページを取得し、本文の文字を最大 limit 文字で返す。
+
+    URL にフラグメント (`#november-3-2026` など) があれば、その id の要素から始まる節だけを返す。
+    1 ページに日付ごとの節が並ぶリリースノートで、その日の分だけを要約に渡すため。
+    """
     body = fetch_url(client, url, MAX_PAGE_BYTES)
-    return html_to_text(body.decode("utf-8", errors="replace"), limit)
+    return html_to_text(body.decode("utf-8", errors="replace"), limit, httpx.URL(url).fragment)
 
 
 def _read_limited(response: httpx.Response, url: str, max_bytes: int) -> bytes:

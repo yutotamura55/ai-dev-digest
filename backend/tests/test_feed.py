@@ -156,6 +156,19 @@ def test_fetch_page_text_extracts_the_article_text() -> None:
         )
 
 
+def test_fetch_page_text_uses_the_fragment_of_the_url_to_pick_the_section() -> None:
+    html = (
+        b'<main><h3 id="november-3-2026">Nov 3</h3><p>today</p>'
+        b'<h3 id="november-2-2026">Nov 2</h3><p>yesterday</p></main>'
+    )
+    with client_returning(httpx.Response(200, content=html)) as client:
+        text = fetch_page_text(
+            client, "https://example.com/notes/overview#november-3-2026", limit=100
+        )
+
+    assert text == "Nov 3\ntoday"
+
+
 def test_fetch_page_text_cuts_at_the_limit() -> None:
     with client_returning(httpx.Response(200, content=b"<p>abcdef</p>")) as client:
         assert fetch_page_text(client, "https://example.com/post", limit=3) == "abc"

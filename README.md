@@ -18,6 +18,7 @@ GCP へのデプロイは [#3](https://github.com/yutotamura55/ai-dev-digest/iss
 
 発信元の一覧は `backend/src/ai_dev_digest/sources.py` にあります。
 発信元ごとに、記事ページを取得して本文を補うかを切り替えられます（`fetch_body`）。
+記事の URL にフラグメント（`overview#november-3-2026` のような `#` の後ろ）があれば、ページのその節だけを本文に使います。
 Anthropic News には RSS がないため対象外です。
 
 ## 1 日の流れ
