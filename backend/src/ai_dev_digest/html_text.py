@@ -135,15 +135,17 @@ class _TextExtractor(HTMLParser):
 
     def handle_endtag(self, tag: str) -> None:
         if tag in SKIPPED_TAGS:
+            # 除外する要素の終了タグは、節の深さの数え方にも関わらせない。
             self._skip_depth = max(0, self._skip_depth - 1)
-        elif tag in BODY_TAGS:
+            return
+        if self._skip_depth:
+            return
+        if tag in BODY_TAGS:
             self._body_depth = max(0, self._body_depth - 1)
             if self._in_section and self._body_depth < self._section_body_depth:
                 self._in_section = False
         elif tag in BLOCK_TAGS:
             self._append("\n")
-        if self._skip_depth:
-            return
         if tag in HEADING_TAGS:
             self._open_heading = 0
         if self._in_section and self._container_depth and tag not in VOID_TAGS:

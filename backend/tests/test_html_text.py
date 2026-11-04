@@ -120,6 +120,12 @@ def test_headings_inside_skipped_elements_do_not_end_the_section() -> None:
     assert html_to_text(html, 500, "x") == "X\none\ntwo"
 
 
+def test_skipped_elements_inside_a_container_do_not_end_the_section() -> None:
+    html = '<main><div id="x"><p>one</p><nav>Navigation</nav><p>two</p></div><p>after</p></main>'
+
+    assert html_to_text(html, 500, "x") == "one\ntwo"
+
+
 def test_fragment_on_an_anchor_inside_a_heading_uses_that_heading_as_the_section() -> None:
     empty = '<h3><a id="x"></a>X</h3><p>today</p><h3>Y</h3><p>yesterday</p>'
     filled = '<h3><a id="x">X</a></h3><p>today</p><h3>Y</h3><p>yesterday</p>'
