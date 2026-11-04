@@ -54,7 +54,7 @@ def test_run_saves_the_top_relevant_articles_of_the_window() -> None:
     assert saved[0].fetched_at == NOW
     assert saved[0].title_ja == "Big model B の訳"
     assert saved[0].summary_ja == "Big model B の要約"
-    assert saved[0].detail_ja == [" の詳細"]
+    assert saved[0].detail_ja == ["の詳細"]
     # 選別には窓の中の 3 件だけを渡す。
     assert [e.url for e in summarizer.judged[0]] == [
         "https://openai.example/a",

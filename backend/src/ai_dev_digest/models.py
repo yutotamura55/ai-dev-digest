@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, Field, field_validator
+
+logger = logging.getLogger(__name__)
 
 TOKYO = ZoneInfo("Asia/Tokyo")
 # 詳細の箇条書きの上限。プロンプトでも同じ数を指示するが、LLM が超えることがあるので切る。
@@ -60,9 +63,20 @@ class Summary(BaseModel):
 
     @field_validator("detail_ja")
     @classmethod
-    def _at_most_max_items(_cls, value: list[str]) -> list[str]:
-        """空の項目を除き、上限を超えた項目は切る。LLM が指示より多く返すことがある。"""
-        return [item for item in value if item.strip()][:MAX_DETAIL_ITEMS]
+    def _clean_items(_cls, value: list[str]) -> list[str]:
+        """各項目の空白を整え、空と重複を除き、上限を超えた分は切る。
+
+        LLM は指示より多く返したり、同じ文を 2 回返したりすることがある。切ったときは
+        警告を出し、プロンプトを見直す手掛かりにする。
+        """
+        items: list[str] = []
+        for raw in value:
+            item = " ".join(raw.split())
+            if item and item not in items:
+                items.append(item)
+        if len(items) > MAX_DETAIL_ITEMS:
+            logger.warning("detail_ja has %d items; keeping %d", len(items), MAX_DETAIL_ITEMS)
+        return items[:MAX_DETAIL_ITEMS]
 
     @field_validator("title_ja")
     @classmethod

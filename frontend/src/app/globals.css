@@ -91,6 +91,18 @@ main > h2 {
   cursor: pointer;
 }
 
+.card-head-static {
+  cursor: default;
+}
+
+.card-link {
+  margin-top: 0.5rem;
+}
+
+.card-link a {
+  text-decoration: underline;
+}
+
 .card-head h3 {
   font-size: 1.05rem;
   margin-bottom: 0.25rem;
