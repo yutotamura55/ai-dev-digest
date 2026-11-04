@@ -60,6 +60,17 @@ describe("fetchArticles", () => {
     ).resolves.toEqual(body);
   });
 
+  it("keeps the path of the base URL", async () => {
+    const fetcher = async (input: RequestInfo | URL) => {
+      expect(String(input)).toBe("https://example.com/api/articles");
+      return Response.json([]);
+    };
+
+    await expect(
+      fetchArticles("https://example.com/api/", fetcher as typeof fetch),
+    ).resolves.toEqual([]);
+  });
+
   it("throws when the API fails", async () => {
     const fetcher = async () => new Response("", { status: 503 });
 

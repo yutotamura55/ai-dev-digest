@@ -38,8 +38,10 @@ def test_job_saves_to_firestore_and_api_returns_it(
     transport = httpx.MockTransport(lambda _request: httpx.Response(200, content=feed_body))
     with httpx.Client(transport=transport) as client:
         assert job.collect(client, store, SOURCE, limit=1) == 1
-        # 同じ記事をもう一度保存しても 1 件のまま。
-        job.collect(client, store, SOURCE, limit=1)
+        first = store.latest(1)[0]
+        # 同じ記事をもう一度集めても新しくは保存せず、最初の収集日時が残る。
+        assert job.collect(client, store, SOURCE, limit=1) == 0
+        assert store.latest(10) == [first]
 
     app.dependency_overrides[get_store] = lambda: store
     try:

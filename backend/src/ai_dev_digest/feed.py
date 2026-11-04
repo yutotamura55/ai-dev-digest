@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import calendar
+import ipaddress
 from datetime import UTC, datetime
 from typing import Any
 
@@ -14,22 +15,62 @@ from ai_dev_digest.models import Article
 # 応答の上限。フィードは通常数百 KB なので、これを超えるものは取り込まない。
 MAX_FEED_BYTES = 5_000_000
 TIMEOUT_SECONDS = 20.0
+MAX_REDIRECTS = 5
+# 取得してはいけない宛先。IP アドレスで書かれた宛先は、別にグローバルなものだけを許す。
+BLOCKED_HOSTS = frozenset({"localhost", "metadata.google.internal", "metadata"})
 
 
 class FeedError(Exception):
     """フィードを取得または解析できなかった。"""
 
 
-def fetch_feed(client: httpx.Client, url: str) -> bytes:
-    """フィードの本文を取得する。HTTP の失敗と大きすぎる応答は FeedError にする。"""
+def check_feed_url(url: httpx.URL) -> None:
+    """https で、内部の宛先でない URL だけを許す。リダイレクトの各段でも呼ぶ。
+
+    ホスト名を DNS で引いた結果までは確かめない。内部のアドレスに解決される名前は、
+    実行環境のネットワークの設定 (#3) で外への通信だけに絞って防ぐ。
+    """
+    if url.scheme != "https":
+        raise FeedError(f"only https feeds are allowed: {url}")
+    host = url.host.lower().rstrip(".")
+    if host in BLOCKED_HOSTS or host.endswith((".internal", ".localhost")):
+        raise FeedError(f"the feed host is not allowed: {url}")
     try:
-        response = client.get(url, timeout=TIMEOUT_SECONDS, follow_redirects=True)
-        response.raise_for_status()
-    except httpx.HTTPError as error:
-        raise FeedError(f"could not fetch the feed: {url}") from error
-    if len(response.content) > MAX_FEED_BYTES:
-        raise FeedError(f"the feed is larger than {MAX_FEED_BYTES} bytes: {url}")
-    return response.content
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return
+    if not address.is_global:
+        raise FeedError(f"the feed host is not allowed: {url}")
+
+
+def fetch_feed(client: httpx.Client, url: str) -> bytes:
+    """フィードの本文を取得する。
+
+    リダイレクトは 1 段ずつ宛先を確かめてからたどる。HTTP の失敗、許さない宛先、
+    上限を超える本文は FeedError にする。本文は上限を超えた時点で読むのをやめる。
+    """
+    target = httpx.URL(url)
+    for _ in range(MAX_REDIRECTS + 1):
+        check_feed_url(target)
+        try:
+            with client.stream("GET", target, timeout=TIMEOUT_SECONDS) as response:
+                if response.is_redirect and response.next_request is not None:
+                    target = response.next_request.url
+                    continue
+                response.raise_for_status()
+                return _read_limited(response, url)
+        except httpx.HTTPError as error:
+            raise FeedError(f"could not fetch the feed: {url}") from error
+    raise FeedError(f"too many redirects: {url}")
+
+
+def _read_limited(response: httpx.Response, url: str) -> bytes:
+    body = bytearray()
+    for chunk in response.iter_bytes():
+        body.extend(chunk)
+        if len(body) > MAX_FEED_BYTES:
+            raise FeedError(f"the feed is larger than {MAX_FEED_BYTES} bytes: {url}")
+    return bytes(body)
 
 
 def parse_feed(body: bytes, source: str, fetched_at: datetime) -> list[Article]:

@@ -45,6 +45,18 @@ def test_collect_saves_only_the_first_articles_up_to_the_limit(
     assert [a.url for a in store.articles.values()] == ["https://example.com/news/second"]
 
 
+def test_collect_does_not_save_an_article_twice(store: FakeArticleStore, feed_body: bytes) -> None:
+    with feed_client(feed_body) as client:
+        assert job.collect(client, store, SOURCE, limit=2) == 2
+        assert job.collect(client, store, SOURCE, limit=2) == 0
+
+
+@pytest.mark.parametrize("limit", [0, -1])
+def test_collect_rejects_a_limit_below_one(store: FakeArticleStore, limit: int) -> None:
+    with feed_client(b"") as client, pytest.raises(ValueError):
+        job.collect(client, store, SOURCE, limit=limit)
+
+
 def test_api_returns_collected_articles(
     store: FakeArticleStore, api: TestClient, feed_body: bytes
 ) -> None:

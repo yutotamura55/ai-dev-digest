@@ -15,14 +15,7 @@ COMPARE_BRANCH="${COMPARE_BRANCH:-origin/main}"
 step() { printf '\n==> %s\n' "$*"; }
 
 step "Install dependencies from the lockfiles"
-uv sync --project backend --locked --quiet
-uv sync --project tools --locked --quiet
-# npm ci は node_modules を消して入れ直すため、lockfile が変わったときだけ実行する。
-lock_hash="$(sha256sum frontend/package-lock.json | cut -d' ' -f1)"
-if [[ "$(cat frontend/node_modules/.lock-hash 2>/dev/null)" != "$lock_hash" ]]; then
-  npm ci --prefix frontend --no-audit --no-fund
-  echo "$lock_hash" > frontend/node_modules/.lock-hash
-fi
+scripts/setup.sh
 
 step "Repository: Dockerfile, shell scripts, workflows"
 hadolint Dockerfile

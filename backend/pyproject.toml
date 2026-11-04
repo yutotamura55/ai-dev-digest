@@ -63,7 +63,7 @@ source = ["ai_dev_digest"]
 [tool.coverage.report]
 show_missing = true
 skip_covered = true
-fail_under = 97.56
+fail_under = 97.65
 
 [tool.vulture]
 paths = ["src", "tests"]

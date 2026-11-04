@@ -34,24 +34,25 @@ services:
   api:
     <<: *dev
     command: >-
-      uv run --project backend --locked
-      uvicorn ai_dev_digest.api:app --host 0.0.0.0 --port 8000 --reload --reload-dir backend/src
+      sh -c "scripts/setup.sh python && uv run --project backend --locked
+      uvicorn ai_dev_digest.api:app --host 0.0.0.0 --port 8000 --reload --reload-dir backend/src"
     ports:
       - "127.0.0.1:8000:8000"
 
   # 記事の収集を 1 回だけ動かす：docker compose run --rm job
+  # 保存先はいつもエミュレーター。FIRESTORE_EMULATOR_HOST は .env より優先される。
   job:
     <<: *dev
     profiles: [job]
     env_file:
       - path: .env
         required: false
-    command: uv run --project backend --locked python -m ai_dev_digest.job
+    command: sh -c "scripts/setup.sh python && uv run --project backend --locked python -m ai_dev_digest.job"
 
   web:
     <<: *dev
     working_dir: /work/frontend
-    command: npm run dev -- --hostname 0.0.0.0 --port 3000
+    command: sh -c "../scripts/setup.sh node && npm run dev -- --hostname 0.0.0.0 --port 3000"
     environment:
       API_BASE_URL: http://api:8000
     ports:

@@ -21,6 +21,8 @@ class FakeArticleStore:
     def save(self, articles: Iterable[Article]) -> int:
         count = 0
         for article in articles:
+            if article.id in self.articles:
+                continue
             self.articles[article.id] = article
             count += 1
         return count

@@ -35,12 +35,14 @@ export function groupByDate(articles: Article[]): DayGroup[] {
     .map(([date, items]) => ({ date, articles: items }));
 }
 
-// API から記事を取得する。失敗したら例外を投げ、画面のエラー表示に任せる。
+// API から記事を取得する。失敗したら例外を投げ、画面のエラー表示 (app/error.tsx) に任せる。
+// apiBaseUrl にパスが付いていても (例: https://example.com/api) そのパスの下を読む。
 export async function fetchArticles(
   apiBaseUrl: string,
   fetcher: typeof fetch = fetch,
 ): Promise<Article[]> {
-  const response = await fetcher(new URL("/articles", apiBaseUrl), {
+  const url = `${apiBaseUrl.replace(/\/+$/, "")}/articles`;
+  const response = await fetcher(url, {
     cache: "no-store",
   });
   if (!response.ok) {

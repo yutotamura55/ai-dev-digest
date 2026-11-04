@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Protocol
 
+from google.api_core.exceptions import AlreadyExists
 from google.cloud import firestore
 
 from ai_dev_digest.models import Article
@@ -16,7 +17,10 @@ class ArticleStore(Protocol):
     """記事の保存先。テストでは同じ形の偽物に差し替える。"""
 
     def save(self, articles: Iterable[Article]) -> int:
-        """記事を保存し、保存した件数を返す。同じ ID の記事は上書きする。"""
+        """まだない記事だけを保存し、新しく保存した件数を返す。
+
+        保存済みの記事は書き換えない。収集日時 (fetched_at) は最初に集めた日時のまま残る。
+        """
         ...
 
     def latest(self, limit: int) -> list[Article]:
@@ -33,7 +37,10 @@ class FirestoreArticleStore:
     def save(self, articles: Iterable[Article]) -> int:
         count = 0
         for article in articles:
-            self._collection.document(article.id).set(article.model_dump())
+            try:
+                self._collection.document(article.id).create(article.model_dump())
+            except AlreadyExists:
+                continue
             count += 1
         return count
 

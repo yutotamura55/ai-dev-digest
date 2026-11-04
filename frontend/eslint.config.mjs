@@ -8,13 +8,14 @@ const eslintConfig = defineConfig([
   ...nextTs,
   // 書式は Prettier に任せ、ぶつかる規則を切る。
   prettier,
-  // Override default ignores of eslint-config-next.
+  // 検査しないファイル。eslint-config-next の既定の除外を上書きするため、既定の 4 つも書く。
   globalIgnores([
-    // Default ignores of eslint-config-next:
+    // eslint-config-next の既定の除外。
     ".next/**",
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Vitest のカバレッジの報告。
     "coverage/**",
   ]),
 ]);
