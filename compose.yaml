@@ -1,0 +1,64 @@
+# 開発環境。使い方は README の「開発」にある。
+# どのサービスも同じ開発用のイメージを使い、リポジトリを /work にマウントする。
+
+x-dev: &dev
+  build: .
+  # どのサービスも同じイメージを使い、ビルドを 1 回で済ませる。
+  image: ai-dev-digest-dev:local
+  # コンテナで作ったファイル（.venv、node_modules）をホストで編集・削除できるよう、ホストの利用者で動かす。
+  user: "${HOST_UID:?export HOST_UID=$(id -u) first}:${HOST_GID:?export HOST_GID=$(id -g) first}"
+  volumes:
+    - .:/work
+    - cache:/cache
+  environment:
+    FIRESTORE_EMULATOR_HOST: firestore:8080
+    GOOGLE_CLOUD_PROJECT: demo-ai-dev-digest
+  depends_on:
+    firestore:
+      condition: service_healthy
+
+services:
+  firestore:
+    image: gcr.io/google.com/cloudsdktool/google-cloud-cli:592.0.0-emulators@sha256:c3b114528245d315af73d92d95d8e2fed9747ce29003ad46232f22b4542da036
+    command: gcloud emulators firestore start --host-port=0.0.0.0:8080
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/"]
+      interval: 2s
+      timeout: 2s
+      retries: 60
+
+  # 検査とテスト：docker compose run --rm dev scripts/check.sh
+  dev:
+    <<: *dev
+
+  api:
+    <<: *dev
+    command: >-
+      sh -c "scripts/setup.sh python && uv run --project backend --locked
+      uvicorn ai_dev_digest.api:app --host 0.0.0.0 --port 8000 --reload --reload-dir backend/src"
+    ports:
+      - "127.0.0.1:8000:8000"
+
+  # 記事の収集を 1 回だけ動かす：docker compose run --rm job
+  # 保存先はいつもエミュレーター。FIRESTORE_EMULATOR_HOST は .env より優先される。
+  job:
+    <<: *dev
+    profiles: [job]
+    env_file:
+      - path: .env
+        required: false
+    command: sh -c "scripts/setup.sh python && uv run --project backend --locked python -m ai_dev_digest.job"
+
+  web:
+    <<: *dev
+    working_dir: /work/frontend
+    command: sh -c "../scripts/setup.sh node && npm run dev -- --hostname 0.0.0.0 --port 3000"
+    environment:
+      API_BASE_URL: http://api:8000
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  cache:

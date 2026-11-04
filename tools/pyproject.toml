@@ -1,0 +1,16 @@
+# リポジトリ全体に使う検査の道具。アプリの依存と版がぶつからないよう、backend と分けている。
+[project]
+name = "ai-dev-digest-tools"
+version = "0"
+requires-python = ">=3.14"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "diff-cover>=11.0.1",
+    "semgrep>=1.183.0",
+    "zizmor>=1.32.0",
+]
+
+[tool.uv]
+package = false
