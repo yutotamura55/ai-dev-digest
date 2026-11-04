@@ -18,3 +18,13 @@ jobs:
     steps:
       # PR で加わる依存に既知の脆弱性があれば失敗にする。
       - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          # Semgrep 1.183.0 が固定している mcp と opentelemetry-api の 5 件だけを許す。
+          # scripts/check.sh の pip-audit の除外と同じもので、理由もそこに書いてある (#1)。
+          # Semgrep が固定を上げたら、両方から外す。
+          allow-ghsas: >-
+            GHSA-84m7-p3x7-pcfv,
+            GHSA-w4fh-qvv9-3v23,
+            GHSA-5h93-6whr-6q8j,
+            GHSA-rwrf-2pqf-9j8j,
+            GHSA-xcq7-p3pf-p88h
