@@ -16,7 +16,7 @@ from ai_dev_digest.feed import (
     fetch_page_text,
     parse_feed,
 )
-from tests.conftest import REAL_RESOLVE_ADDRESSES
+from tests.conftest import PUBLIC_ADDRESS, REAL_RESOLVE_ADDRESSES, original_url
 
 SOURCE = "Example"
 FEED_URL = "https://example.com/feed.xml"
@@ -86,6 +86,39 @@ def test_fetch_feed_returns_the_body(feed_body: bytes) -> None:
         assert fetch_feed(client, FEED_URL) == feed_body
 
 
+def test_fetch_feed_connects_to_the_checked_address_and_verifies_the_host_name() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, content=b"body")
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        assert fetch_feed(client, "https://example.com:8443/feed.xml?x=1") == b"body"
+
+    [request] = seen
+    # 接続先は DNS で確かめた IP。ホスト名は Host ヘッダーと TLS の SNI で送る。
+    assert str(request.url) == f"https://{PUBLIC_ADDRESS}:8443/feed.xml?x=1"
+    assert request.headers["host"] == "example.com:8443"
+    assert request.extensions["sni_hostname"] == "example.com"
+
+
+def test_fetch_feed_pins_an_ipv6_address_with_brackets(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        feed, "resolve_addresses", lambda _host: ["2606:2800:220:1:248:1893:25c8:1946"]
+    )
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, content=b"body")
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        fetch_feed(client, FEED_URL)
+
+    assert str(seen[0].url) == "https://[2606:2800:220:1:248:1893:25c8:1946]/feed.xml"
+
+
 def test_fetch_feed_raises_on_http_error() -> None:
     with client_returning(httpx.Response(503)) as client, pytest.raises(FeedError):
         fetch_feed(client, FEED_URL)
@@ -120,7 +153,7 @@ def redirecting_client(location: str, final_body: bytes = b"<rss/>") -> httpx.Cl
     """最初のリクエストを location へリダイレクトし、その先では final_body を返す。"""
 
     def handler(request: httpx.Request) -> httpx.Response:
-        if request.url == httpx.URL(FEED_URL):
+        if original_url(request) == FEED_URL:
             return httpx.Response(302, headers={"Location": location})
         return httpx.Response(200, content=final_body)
 
@@ -130,6 +163,25 @@ def redirecting_client(location: str, final_body: bytes = b"<rss/>") -> httpx.Cl
 def test_fetch_feed_follows_a_redirect_to_another_https_host() -> None:
     with redirecting_client("https://feeds.example.org/rss", b"body") as client:
         assert fetch_feed(client, FEED_URL) == b"body"
+
+
+def test_fetch_feed_resolves_a_relative_redirect_against_the_host_name() -> None:
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(original_url(request))
+        if len(seen) == 1:
+            return httpx.Response(302, headers={"Location": "/moved/feed.xml"})
+        return httpx.Response(200, content=b"body")
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        assert fetch_feed(client, FEED_URL) == b"body"
+    assert seen == [FEED_URL, "https://example.com/moved/feed.xml"]
+
+
+def test_fetch_feed_fails_on_a_redirect_without_location() -> None:
+    with client_returning(httpx.Response(302)) as client, pytest.raises(FeedError):
+        fetch_feed(client, FEED_URL)
 
 
 @pytest.mark.parametrize(
@@ -189,7 +241,7 @@ def test_fetch_feed_rejects_a_redirect_to_an_internal_address() -> None:
     requested: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        requested.append(str(request.url))
+        requested.append(original_url(request))
         return httpx.Response(302, headers={"Location": "http://169.254.169.254/computeMetadata"})
 
     with httpx.Client(transport=httpx.MockTransport(handler)) as client, pytest.raises(FeedError):

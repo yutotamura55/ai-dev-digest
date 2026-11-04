@@ -41,12 +41,15 @@ def resolve_addresses(host: str) -> list[str]:
     return [str(info[4][0]) for info in infos]
 
 
-def check_url(url: httpx.URL) -> None:
-    """https で、内部の宛先に向かわない URL だけを許す。リダイレクトの各段でも呼ぶ。
+type IPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
+
+
+def check_url(url: httpx.URL) -> IPAddress:
+    """https で、内部の宛先に向かわない URL だけを許し、接続に使うアドレスを返す。
 
     記事の URL はフィードが決めるため、ホスト名が内部のアドレス (メタデータサーバーなど) に
-    解決される場合も拒む。確かめてから接続するまでの間に解決先が変わる可能性は残るので、
-    実行環境のネットワークの設定 (#3) でも外への通信だけに絞る。
+    解決される場合も拒む。接続はここで確かめたアドレスに固定する (fetch_url) ので、確かめた後に
+    DNS の答えが変わっても (DNS rebinding)、内部の宛先にはつながらない。
     """
     if url.scheme != "https":
         raise FeedError(f"only https URLs are allowed: {url}")
@@ -59,6 +62,7 @@ def check_url(url: httpx.URL) -> None:
         addresses = [ipaddress.ip_address(address) for address in resolve_addresses(host)]
     if not addresses or not all(address.is_global for address in addresses):
         raise FeedError(f"the host is not allowed: {url}")
+    return addresses[0]
 
 
 def fetch_url(client: httpx.Client, url: str, max_bytes: int) -> bytes:
@@ -72,17 +76,29 @@ def fetch_url(client: httpx.Client, url: str, max_bytes: int) -> bytes:
     except httpx.InvalidURL as error:
         raise FeedError(f"invalid URL: {url}") from error
     for _ in range(MAX_REDIRECTS + 1):
-        check_url(target)
+        address = check_url(target)
         try:
-            with client.stream("GET", target, timeout=TIMEOUT_SECONDS) as response:
-                if response.is_redirect and response.next_request is not None:
-                    target = response.next_request.url
+            with client.stream("GET", **_pinned_request(target, address)) as response:
+                if response.is_redirect:
+                    # 相対の Location は、接続先の IP ではなく元の URL を基準に解決する。
+                    target = target.join(response.headers.get("location", ""))
                     continue
                 response.raise_for_status()
                 return _read_limited(response, url, max_bytes)
         except httpx.HTTPError as error:
             raise FeedError(f"could not fetch {url}") from error
     raise FeedError(f"too many redirects: {url}")
+
+
+def _pinned_request(url: httpx.URL, address: IPAddress) -> dict[str, Any]:
+    """確かめた IP アドレスに接続し、TLS の検証と Host ヘッダーは元のホスト名で行う要求の引数。"""
+    literal = f"[{address}]" if address.version == 6 else str(address)
+    return {
+        "url": url.copy_with(host=literal),
+        "headers": {"Host": url.netloc.decode()},
+        "extensions": {"sni_hostname": url.host},
+        "timeout": TIMEOUT_SECONDS,
+    }
 
 
 def fetch_feed(client: httpx.Client, url: str) -> bytes:

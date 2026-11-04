@@ -99,6 +99,11 @@ def item(title: str, url: str, published: str | None, summary: str = "") -> str:
     return "".join(parts)
 
 
+def original_url(request: httpx.Request) -> str:
+    """fetch_url は確かめた IP に接続し、ホスト名は Host ヘッダーで送る。元の URL に戻す。"""
+    return f"{request.url.scheme}://{request.headers['host']}{request.url.raw_path.decode()}"
+
+
 def routing_client(routes: dict[str, httpx.Response | bytes]) -> tuple[httpx.Client, list[str]]:
     """URL ごとに決まった応答を返す HTTP クライアントと、要求した URL の記録を返す。
 
@@ -107,8 +112,9 @@ def routing_client(routes: dict[str, httpx.Response | bytes]) -> tuple[httpx.Cli
     requested: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        requested.append(str(request.url))
-        response = routes.get(str(request.url))
+        url = original_url(request)
+        requested.append(url)
+        response = routes.get(url)
         if response is None:
             return httpx.Response(404)
         if isinstance(response, bytes):
