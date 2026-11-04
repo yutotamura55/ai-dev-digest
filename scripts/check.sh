@@ -29,7 +29,7 @@ uv run --project tools --locked semgrep scan --metrics=off --error --quiet \
   --config p/python --config p/typescript --config p/react --config p/nextjs \
   --config p/dockerfile --config p/github-actions
 
-step "Backend (Python): format, lint, types, unused code, tests, audit"
+step "Backend (Python): format, lint, types, unused code, tests"
 (
   cd backend
   uv run --locked ruff format --check .
@@ -37,12 +37,32 @@ step "Backend (Python): format, lint, types, unused code, tests, audit"
   uv run --locked mypy
   uv run --locked vulture
   uv run --locked pytest -q --cov --cov-report=term --cov-report=xml:coverage.xml
-  # 自分自身 (ai-dev-digest) は PyPI にないため、lockfile から書き出した依存だけを監査する。
-  requirements="$(mktemp)"
-  uv export --locked --all-groups --no-emit-project --quiet --output-file "$requirements"
-  uv run --locked pip-audit --strict --disable-pip --require-hashes --requirement "$requirements"
-  rm -f "$requirements"
 )
+
+step "Python dependency audit (backend and tools)"
+# 自分自身 (ai-dev-digest) は PyPI にないため、lockfile から書き出した依存だけを監査する。
+audit_lockfile() {
+  local project="$1"
+  shift
+  local requirements
+  requirements="$(mktemp)"
+  uv export --project "$project" --locked --all-groups --no-emit-project --quiet \
+    --output-file "$requirements"
+  uv run --project backend --locked pip-audit --strict --disable-pip --require-hashes \
+    --requirement "$requirements" "$@"
+  rm -f "$requirements"
+}
+audit_lockfile backend
+# Semgrep 1.183.0 は mcp==1.29.0 と opentelemetry-api~=1.37.0 を固定しており、tools の中では直せない
+# (semgrep/semgrep#12018)。semgrep scan はこの 5 件の脆弱な処理を呼ばない (2026-11-04 に、
+# scan の実行中に該当するクラスの生成と関数の呼び出しが 0 回であることを確かめた。ai-dev-digest#1)。
+# Semgrep が固定を上げたら、除外を外す。ほかの脆弱性が見つかれば、これまでどおり失敗する。
+audit_lockfile tools \
+  --ignore-vuln CVE-2026-59951 \
+  --ignore-vuln CVE-2026-116684 \
+  --ignore-vuln CVE-2026-116685 \
+  --ignore-vuln CVE-2026-116686 \
+  --ignore-vuln CVE-2026-114603
 
 step "Frontend (Next.js): format, lint, types, unused code, tests, audit"
 (

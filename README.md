@@ -67,6 +67,7 @@ docker compose up api web
 `.env.example` を `.env` に写すと、OpenAI のニュースのフィードから最新の 1 件を集めます。
 
 ```bash
+export HOST_UID=$(id -u) HOST_GID=$(id -g)
 cp .env.example .env
 docker compose run --rm job
 ```
