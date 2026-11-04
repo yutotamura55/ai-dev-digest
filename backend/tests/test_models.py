@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from ai_dev_digest.models import Article, date_jst
+import pytest
+
+from ai_dev_digest.models import Article, Summary, date_jst
 from tests.conftest import NOW, article
 
 
@@ -18,3 +20,11 @@ def test_article_without_title_ja_still_loads() -> None:
     del stored["title_ja"]
 
     assert Article.model_validate(stored).title_ja == ""
+
+
+def test_summary_title_ja_is_one_line_and_not_empty() -> None:
+    summary = Summary(title_ja=" 新しい\nモデル  ", summary_ja="s", detail_ja=[])
+
+    assert summary.title_ja == "新しい モデル"
+    with pytest.raises(ValueError, match="title_ja"):
+        Summary(title_ja=" \n ", summary_ja="s", detail_ja=[])

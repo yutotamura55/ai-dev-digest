@@ -65,12 +65,17 @@ describe("cardTitles", () => {
     });
   });
 
-  it("falls back to the original title when the translation is empty or the same", () => {
+  it("falls back to the original title when the translation is missing, empty, or the same", () => {
+    expect(cardTitles({ title: "New model" })).toEqual({
+      heading: "New model",
+      original: null,
+    });
     expect(cardTitles({ title: "New model", title_ja: " " })).toEqual({
       heading: "New model",
       original: null,
     });
-    expect(cardTitles({ title: "Gemma 4", title_ja: "Gemma 4" })).toEqual({
+    // RSS の題名に付く末尾の空白は無視して比べる。
+    expect(cardTitles({ title: "Gemma 4 ", title_ja: "Gemma 4" })).toEqual({
       heading: "Gemma 4",
       original: null,
     });

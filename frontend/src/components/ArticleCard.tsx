@@ -20,9 +20,7 @@ export function ArticleCard({ article }: { article: Article }) {
       <div className="card-head" onClick={toggle}>
         <h3>{titles.heading}</h3>
         {titles.original !== null && (
-          <p className="card-original-title" lang="en">
-            {titles.original}
-          </p>
+          <p className="card-original-title">{titles.original}</p>
         )}
         <p className="card-meta">
           {article.source} · {formatTimeInTokyo(article.published_at)}

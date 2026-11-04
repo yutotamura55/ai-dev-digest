@@ -2,8 +2,8 @@
 
 export type Article = {
   title: string;
-  // 題名の日本語訳。古い記事では空。
-  title_ja: string;
+  // 題名の日本語訳。古い記事では空。#14 より前の API の応答にはこの項目自体がない。
+  title_ja?: string;
   url: string;
   source: string;
   published_at: string;
@@ -93,11 +93,12 @@ export function cardTitles(article: Pick<Article, "title" | "title_ja">): {
   heading: string;
   original: string | null;
 } {
-  const translated = article.title_ja.trim();
-  if (translated === "" || translated === article.title) {
-    return { heading: article.title, original: null };
+  const original = article.title.trim();
+  const translated = (article.title_ja ?? "").trim();
+  if (translated === "" || translated === original) {
+    return { heading: original, original: null };
   }
-  return { heading: translated, original: article.title };
+  return { heading: translated, original };
 }
 
 // 原文へのリンクに添えるホスト名。URL として読めなければ URL をそのまま返す。
