@@ -9,6 +9,8 @@ from zoneinfo import ZoneInfo
 from pydantic import BaseModel, Field, field_validator
 
 TOKYO = ZoneInfo("Asia/Tokyo")
+# 詳細の箇条書きの上限。プロンプトでも同じ数を指示するが、LLM が超えることがあるので切る。
+MAX_DETAIL_ITEMS = 6
 
 
 def article_id(url: str) -> str:
@@ -55,6 +57,12 @@ class Summary(BaseModel):
     summary_ja: str
     # 箇条書きの詳細。
     detail_ja: list[str]
+
+    @field_validator("detail_ja")
+    @classmethod
+    def _at_most_max_items(_cls, value: list[str]) -> list[str]:
+        """空の項目を除き、上限を超えた項目は切る。LLM が指示より多く返すことがある。"""
+        return [item for item in value if item.strip()][:MAX_DETAIL_ITEMS]
 
     @field_validator("title_ja")
     @classmethod

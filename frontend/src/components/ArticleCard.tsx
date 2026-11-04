@@ -40,12 +40,15 @@ export function ArticleCard({ article }: { article: Article }) {
       </div>
       {open && (
         <div className="card-detail">
-          <ul>
-            {/* LLM が同じ文を 2 回返すことがあるので、番号を key にする。 */}
-            {article.detail_ja.map((line, index) => (
-              <li key={index}>{line}</li>
-            ))}
-          </ul>
+          {/* 短い記事では詳細が空のことがある (#18)。そのときは原文へのリンクだけを出す。 */}
+          {article.detail_ja.length > 0 && (
+            <ul>
+              {/* LLM が同じ文を 2 回返すことがあるので、番号を key にする。 */}
+              {article.detail_ja.map((line, index) => (
+                <li key={index}>{line}</li>
+              ))}
+            </ul>
+          )}
           <a href={article.url} target="_blank" rel="noopener noreferrer">
             原文を読む ({hostnameOf(article.url)})
           </a>

@@ -4,7 +4,7 @@ from datetime import timedelta
 
 import pytest
 
-from ai_dev_digest.models import Article, Summary, date_jst
+from ai_dev_digest.models import MAX_DETAIL_ITEMS, Article, Summary, date_jst
 from tests.conftest import NOW, article
 
 
@@ -28,3 +28,11 @@ def test_summary_title_ja_is_one_line_and_not_empty() -> None:
     assert summary.title_ja == "新しい モデル"
     with pytest.raises(ValueError, match="title_ja"):
         Summary(title_ja=" \n ", summary_ja="s", detail_ja=[])
+
+
+def test_summary_detail_ja_drops_empty_items_and_cuts_at_the_maximum() -> None:
+    items = [f"点 {i}" for i in range(MAX_DETAIL_ITEMS + 2)]
+    summary = Summary(title_ja="t", summary_ja="s", detail_ja=[" ", *items])
+
+    assert summary.detail_ja == items[:MAX_DETAIL_ITEMS]
+    assert Summary(title_ja="t", summary_ja="s", detail_ja=[]).detail_ja == []

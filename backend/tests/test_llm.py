@@ -147,6 +147,9 @@ def test_summarize_returns_the_japanese_summary() -> None:
     assert record["body"] == "x" * SUMMARY_INPUT_CHARS
     assert "信頼できないデータ" in requests[0]["system"]
     assert "title_ja" in requests[0]["system"]
+    # 詳細は要約の言い直しにせず、短い記事では空でよいと指示する (#18)。
+    assert "summary_ja と同じ内容は繰り返しません" in requests[0]["system"]
+    assert "空の配列" in requests[0]["system"]
     assert requests[0]["output_config"]["effort"] == "medium"
     assert "title_ja" in requests[0]["output_config"]["format"]["schema"]["required"]
     assert requests[0]["output_config"]["format"]["type"] == "json_schema"
