@@ -64,9 +64,9 @@ export function ArticleCard({ article }: { article: Article }) {
       {open && (
         <div className="card-detail">
           <ul>
-            {/* 項目は保存時に重複を除いてあるので、文字列を key にできる。 */}
-            {article.detail_ja.map((line) => (
-              <li key={line}>{line}</li>
+            {/* #18 より前に保存した記事には同じ文が 2 回あることがあるので、番号を key にする。 */}
+            {article.detail_ja.map((line, index) => (
+              <li key={index}>{line}</li>
             ))}
           </ul>
           {originalLink}
