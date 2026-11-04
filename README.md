@@ -14,10 +14,10 @@ GCP へのデプロイは [#3](https://github.com/yutotamura55/ai-dev-digest/iss
 | Claude Platform release notes | <https://platform.claude.com/docs/en/release-notes/feed.xml> | |
 | Google DeepMind | <https://deepmind.google/blog/rss.xml> | |
 | Google The Keyword（AI） | <https://blog.google/innovation-and-ai/technology/ai/rss/> | |
-| Google Developers Blog | <https://developers.googleblog.com/feeds/posts/default/> | フィードの項目に公開日時がなく、新着を判定できないため、いまは記事が集まらない |
+| Google Developers Blog | <https://developers.googleblog.com/feeds/posts/default/> | フィードの項目に公開日時がないため、記事ページの構造化データ（JSON-LD の `datePublished`）から補う |
 
 発信元の一覧は `backend/src/ai_dev_digest/sources.py` にあります。
-発信元ごとに、記事ページを取得して本文を補うかを切り替えられます（`fetch_body`）。
+発信元ごとに、記事ページを取得して本文を補うか（`fetch_body`）、フィードにない公開日時を記事ページから補うか（`date_from_page`）を切り替えられます。
 記事の URL にフラグメント（`overview#november-3-2026` のような `#` の後ろ）があれば、ページのその節だけを本文に使います。
 Anthropic News には RSS がないため対象外です。
 

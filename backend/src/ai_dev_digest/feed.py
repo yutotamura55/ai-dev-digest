@@ -12,8 +12,8 @@ from typing import Any
 import feedparser
 import httpx
 
-from ai_dev_digest.html_text import html_to_text
-from ai_dev_digest.models import FeedEntry
+from ai_dev_digest.html_text import PageDate, html_to_text, published_at_from_html
+from ai_dev_digest.models import FeedItem
 
 logger = logging.getLogger(__name__)
 
@@ -131,14 +131,25 @@ def fetch_feed(client: httpx.Client, url: str) -> bytes:
     return fetch_url(client, url, MAX_FEED_BYTES)
 
 
-def fetch_page_text(client: httpx.Client, url: str, limit: int) -> str:
-    """記事ページを取得し、本文の文字を最大 limit 文字で返す。
+def fetch_page(client: httpx.Client, url: str) -> tuple[str, httpx.URL]:
+    """記事ページの HTML と、リダイレクトをたどった後の URL を返す。"""
+    body, final_url = _fetch(client, url, MAX_PAGE_BYTES)
+    return body.decode("utf-8", errors="replace"), final_url
+
+
+def page_text(page: tuple[str, httpx.URL], limit: int) -> str:
+    """取得したページ (fetch_page の結果) から本文の文字を最大 limit 文字で返す。
 
     URL にフラグメント (`#november-3-2026` など) があれば、その id の要素から始まる節だけを返す。
     1 ページに日付ごとの節が並ぶリリースノートで、その日の分だけを要約に渡すため。
     """
-    body, final_url = _fetch(client, url, MAX_PAGE_BYTES)
-    return html_to_text(body.decode("utf-8", errors="replace"), limit, final_url.fragment)
+    html, final_url = page
+    return html_to_text(html, limit, final_url.fragment)
+
+
+def fetch_page_text(client: httpx.Client, url: str, limit: int) -> str:
+    """記事ページを取得し、本文の文字を最大 limit 文字で返す。"""
+    return page_text(fetch_page(client, url), limit)
 
 
 def _read_limited(response: httpx.Response, url: str, max_bytes: int) -> bytes:
@@ -150,38 +161,36 @@ def _read_limited(response: httpx.Response, url: str, max_bytes: int) -> bytes:
     return bytes(body)
 
 
-def parse_feed(body: bytes, source: str) -> list[FeedEntry]:
+def parse_feed(body: bytes, source: str) -> list[FeedItem]:
     """フィードの本文から項目の一覧を作る。
 
-    題名がない項目と、URL が http(s) の形でない項目は飛ばす。公開日時のない項目も、
-    新着かどうかを判定できないため飛ばす。
+    題名がない項目と、URL が http(s) の形でない項目は飛ばす。公開日時のない項目は
+    published_at を None にして返し、扱いは呼び出し側 (job.collect_entries) が決める。
     """
     parsed = feedparser.parse(body)
     if parsed.get("bozo") and not parsed.get("entries"):
         raise FeedError(f"could not parse the feed: {source}")
-    entries = []
-    undated = 0
+    items = []
     for entry in parsed.get("entries", []):
         title = str(entry.get("title", "")).strip()
         url = str(entry.get("link", "")).strip()
         if not title or not _is_web_url(url):
             continue
-        published_at = _published_at(entry)
-        if published_at is None:
-            undated += 1
-            continue
-        entries.append(
-            FeedEntry(
+        items.append(
+            FeedItem(
                 title=title,
                 url=url,
                 source=source,
-                published_at=published_at,
+                published_at=_published_at(entry),
                 content=_content(entry),
             )
         )
-    if undated:
-        logger.warning("%s: skipped %d entries without a publication date", source, undated)
-    return entries
+    return items
+
+
+def page_date(page: tuple[str, httpx.URL]) -> PageDate | None:
+    """取得したページの構造化データから公開日時を読む。日付がなければ None。"""
+    return published_at_from_html(page[0])
 
 
 def _is_web_url(url: str) -> bool:

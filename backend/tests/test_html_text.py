@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta, timezone
+
 import pytest
 
-from ai_dev_digest.html_text import html_to_text
+from ai_dev_digest.html_text import PageDate, html_to_text, published_at_from_html
 
 
 def test_uses_only_the_article_when_the_page_has_one() -> None:
@@ -161,3 +163,92 @@ def test_fragment_section_skips_scripts_and_cuts_at_the_limit() -> None:
 
 def test_unbalanced_end_tags_do_not_break_extraction() -> None:
     assert html_to_text("</article></script><p>ok</p>", 100) == "ok"
+
+
+def ld(payload: str) -> str:
+    return f'<script type="application/ld+json">{payload}</script>'
+
+
+def test_published_at_from_json_ld_date_only_is_midnight_utc() -> None:
+    html = (
+        "<html><head>"
+        + ld('{"@type": "Article", "datePublished": "2026-11-03"}')
+        + "</head></html>"
+    )
+
+    assert published_at_from_html(html) == PageDate(datetime(2026, 11, 3, tzinfo=UTC), True)
+
+
+def test_published_at_from_json_ld_with_time_zone_is_converted_to_utc() -> None:
+    html = ld('{"datePublished": "2026-11-03T09:30:00+09:00"}')
+
+    assert published_at_from_html(html) == PageDate(datetime(2026, 11, 3, 0, 30, tzinfo=UTC), False)
+    assert published_at_from_html(ld('{"datePublished": "2026-11-03T00:30:00Z"}')) == PageDate(
+        datetime(2026, 11, 3, 0, 30, tzinfo=UTC), False
+    )
+    # 時刻つきの 0:00 は日付だけとは区別する。
+    assert published_at_from_html(ld('{"datePublished": "2026-11-03T00:00:00Z"}')) == PageDate(
+        datetime(2026, 11, 3, tzinfo=UTC), False
+    )
+
+
+def test_published_at_assumes_utc_for_a_naive_datetime() -> None:
+    assert published_at_from_html(ld('{"datePublished": "2026-11-03T01:00:00"}')) == PageDate(
+        datetime(2026, 11, 3, 1, 0, tzinfo=timezone(timedelta(0))), False
+    )
+
+
+def test_published_at_searches_nested_graph_and_skips_other_scripts() -> None:
+    html = (
+        ld('{"@type": "BreadcrumbList", "itemListElement": []}')
+        + ld("not json at all")
+        + ld(
+            '{"@graph": [{"@type": "WebPage"}, '
+            '{"@type": "Article", "datePublished": "2026-10-30"}]}'
+        )
+    )
+
+    assert published_at_from_html(html) == PageDate(datetime(2026, 10, 30, tzinfo=UTC), True)
+
+
+def test_published_at_ignores_json_nested_too_deeply() -> None:
+    deep = ld("[" * 100_000 + "]" * 100_000)
+    nested = ld('{"a": ' * 30 + '{"datePublished": "2026-11-03"}' + "}" * 30)
+    fallback = '<meta property="article:published_time" content="2026-11-01">'
+
+    assert published_at_from_html(deep + fallback) == PageDate(
+        datetime(2026, 11, 1, tzinfo=UTC), True
+    )
+    assert published_at_from_html(nested) is None
+
+
+def test_published_at_falls_back_to_meta_tags() -> None:
+    html = (
+        '<meta property="article:published_time" content="2026-11-02T17:45:00+00:00">'
+        '<meta name="published_time" content="2026-11-01">'
+    )
+
+    assert published_at_from_html(html) == PageDate(
+        datetime(2026, 11, 2, 17, 45, tzinfo=UTC), False
+    )
+
+
+def test_published_at_accepts_a_mime_parameter_and_itemprop_meta() -> None:
+    with_charset = (
+        '<script type="application/ld+json; charset=utf-8">{"datePublished": "2026-11-03"}</script>'
+    )
+    assert published_at_from_html(with_charset) == PageDate(datetime(2026, 11, 3, tzinfo=UTC), True)
+    assert published_at_from_html('<meta itemprop="datePublished" content="2026-11-02">') == (
+        PageDate(datetime(2026, 11, 2, tzinfo=UTC), True)
+    )
+
+
+def test_published_at_is_none_for_a_date_that_cannot_be_converted_to_utc() -> None:
+    assert published_at_from_html(ld('{"datePublished": "0001-01-01T00:00:00+09:00"}')) is None
+
+
+def test_published_at_is_none_without_a_usable_date() -> None:
+    assert published_at_from_html("<p>no metadata</p>") is None
+    assert published_at_from_html('<meta name="description" content="2026-11-03">') is None
+    assert published_at_from_html(ld('{"datePublished": "yesterday"}')) is None
+    assert published_at_from_html('<meta property="article:published_time" content="">') is None

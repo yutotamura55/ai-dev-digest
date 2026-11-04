@@ -13,8 +13,10 @@ from ai_dev_digest.feed import (
     MAX_REDIRECTS,
     FeedError,
     fetch_feed,
+    fetch_page,
     fetch_page_text,
     make_client,
+    page_date,
     parse_feed,
 )
 from tests.conftest import PUBLIC_ADDRESS, REAL_RESOLVE_ADDRESSES, original_url
@@ -27,15 +29,18 @@ def client_returning(response: httpx.Response) -> httpx.Client:
     return httpx.Client(transport=httpx.MockTransport(lambda _request: response))
 
 
-def test_parse_feed_keeps_dated_entries_with_title_and_web_link(feed_body: bytes) -> None:
+def test_parse_feed_keeps_entries_with_title_and_web_link(feed_body: bytes) -> None:
     entries = parse_feed(feed_body, source=SOURCE)
 
     assert [e.url for e in entries] == [
         "https://example.com/news/second",
         "https://example.com/news/first",
+        "https://example.com/news/undated",
     ]
     assert entries[0].title == "Second model release"
     assert entries[0].source == SOURCE
+    # 公開日時のない項目は None のまま返し、扱いは job が決める。
+    assert entries[2].published_at is None
 
 
 def test_parse_feed_converts_published_date_to_utc(feed_body: bytes) -> None:
@@ -211,6 +216,25 @@ def test_fetch_page_text_drops_the_fragment_when_the_redirect_clears_it() -> Non
 
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
         assert fetch_page_text(client, "https://example.com/notes#y", limit=100) == "Y\ny\nZ\nz"
+
+
+def test_page_date_reads_the_structured_data_of_a_fetched_page() -> None:
+    html = (
+        b'<html><head><script type="application/ld+json">'
+        b'{"@type": "Article", "datePublished": "2026-11-03"}</script></head></html>'
+    )
+    with client_returning(httpx.Response(200, content=html)) as client:
+        page = fetch_page(client, "https://example.com/post")
+
+    assert page_date(page) == (datetime(2026, 11, 3, tzinfo=UTC), True)
+    assert str(page[1]) == "https://example.com/post"
+
+
+def test_page_date_is_none_without_a_date_and_fetch_page_raises_on_failure() -> None:
+    with client_returning(httpx.Response(200, content=b"<p>no date</p>")) as client:
+        assert page_date(fetch_page(client, "https://example.com/post")) is None
+    with client_returning(httpx.Response(403)) as client, pytest.raises(FeedError):
+        fetch_page(client, "https://example.com/post")
 
 
 def test_fetch_page_text_cuts_at_the_limit() -> None:
