@@ -85,6 +85,11 @@ def fetch_url(client: httpx.Client, url: str, max_bytes: int) -> bytes:
     リダイレクトは 1 段ずつ宛先を確かめてからたどる。HTTP の失敗、許さない宛先、
     上限を超える本文は FeedError にする。本文は上限を超えた時点で読むのをやめる。
     """
+    return _fetch(client, url, max_bytes)[0]
+
+
+def _fetch(client: httpx.Client, url: str, max_bytes: int) -> tuple[bytes, httpx.URL]:
+    """URL の本文と、リダイレクトをたどった後の最終的な URL を返す。"""
     try:
         target = httpx.URL(url)
     except httpx.InvalidURL as error:
@@ -95,10 +100,16 @@ def fetch_url(client: httpx.Client, url: str, max_bytes: int) -> bytes:
             with client.stream("GET", **_pinned_request(target, address)) as response:
                 if response.is_redirect:
                     # 相対の Location は、接続先の IP ではなく元の URL を基準に解決する。
-                    target = target.join(response.headers.get("location", ""))
+                    # Location に # がなければ元のフラグメントを引き継ぐ (RFC 9110)。
+                    # "/moved#" のように空でも # があれば、フラグメントを消す指示として扱う。
+                    raw_location = response.headers.get("location", "")
+                    location = target.join(raw_location)
+                    if "#" not in raw_location:
+                        location = location.copy_with(fragment=target.fragment or None)
+                    target = location
                     continue
                 response.raise_for_status()
-                return _read_limited(response, url, max_bytes)
+                return _read_limited(response, url, max_bytes), target
         except httpx.HTTPError as error:
             raise FeedError(f"could not fetch {url}") from error
     raise FeedError(f"too many redirects: {url}")
@@ -121,9 +132,13 @@ def fetch_feed(client: httpx.Client, url: str) -> bytes:
 
 
 def fetch_page_text(client: httpx.Client, url: str, limit: int) -> str:
-    """記事ページを取得し、本文の文字を最大 limit 文字で返す。"""
-    body = fetch_url(client, url, MAX_PAGE_BYTES)
-    return html_to_text(body.decode("utf-8", errors="replace"), limit)
+    """記事ページを取得し、本文の文字を最大 limit 文字で返す。
+
+    URL にフラグメント (`#november-3-2026` など) があれば、その id の要素から始まる節だけを返す。
+    1 ページに日付ごとの節が並ぶリリースノートで、その日の分だけを要約に渡すため。
+    """
+    body, final_url = _fetch(client, url, MAX_PAGE_BYTES)
+    return html_to_text(body.decode("utf-8", errors="replace"), limit, final_url.fragment)
 
 
 def _read_limited(response: httpx.Response, url: str, max_bytes: int) -> bytes:
