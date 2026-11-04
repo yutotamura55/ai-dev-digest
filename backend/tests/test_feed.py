@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 import httpx
 import pytest
 
+from ai_dev_digest import feed
 from ai_dev_digest.feed import (
     MAX_FEED_BYTES,
     MAX_PAGE_BYTES,
@@ -15,6 +16,7 @@ from ai_dev_digest.feed import (
     fetch_page_text,
     parse_feed,
 )
+from tests.conftest import REAL_RESOLVE_ADDRESSES
 
 SOURCE = "Example"
 FEED_URL = "https://example.com/feed.xml"
@@ -144,6 +146,43 @@ def test_fetch_feed_follows_a_redirect_to_another_https_host() -> None:
 def test_fetch_feed_rejects_an_internal_or_plain_http_url(url: str) -> None:
     with client_returning(httpx.Response(200, content=b"body")) as client, pytest.raises(FeedError):
         fetch_feed(client, url)
+
+
+@pytest.mark.parametrize("addresses", [["10.0.0.1"], ["93.184.216.34", "169.254.169.254"], []])
+def test_fetch_feed_rejects_a_host_that_resolves_to_an_internal_address(
+    monkeypatch: pytest.MonkeyPatch, addresses: list[str]
+) -> None:
+    monkeypatch.setattr(feed, "resolve_addresses", lambda _host: addresses)
+    requested: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested.append(str(request.url))
+        return httpx.Response(200, content=b"body")
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client, pytest.raises(FeedError):
+        fetch_feed(client, FEED_URL)
+    assert requested == []
+
+
+def test_fetch_feed_rejects_a_host_that_cannot_be_resolved(monkeypatch: pytest.MonkeyPatch) -> None:
+    def failing(host: str) -> list[str]:
+        raise FeedError(f"could not resolve the host: {host}")
+
+    monkeypatch.setattr(feed, "resolve_addresses", failing)
+    with client_returning(httpx.Response(200, content=b"body")) as client, pytest.raises(FeedError):
+        fetch_feed(client, FEED_URL)
+
+
+def test_resolve_addresses_uses_dns() -> None:
+    # localhost は /etc/hosts で引けるので、ネットワークなしで確かめられる。
+    assert set(REAL_RESOLVE_ADDRESSES("localhost")) & {"127.0.0.1", "::1"}
+    with pytest.raises(FeedError, match="resolve"):
+        REAL_RESOLVE_ADDRESSES("nonexistent.invalid")
+
+
+def test_fetch_feed_rejects_a_malformed_url() -> None:
+    with client_returning(httpx.Response(200, content=b"body")) as client, pytest.raises(FeedError):
+        fetch_feed(client, "https://example.com:bad/feed.xml")
 
 
 def test_fetch_feed_rejects_a_redirect_to_an_internal_address() -> None:

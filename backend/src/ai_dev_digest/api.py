@@ -33,6 +33,11 @@ def get_store() -> ArticleStore:
     return FirestoreArticleStore(firestore.Client())
 
 
+def now_utc() -> datetime:
+    """現在の日時。テストでは差し替える。"""
+    return datetime.now(UTC)
+
+
 @app.get("/healthz")
 def healthz() -> dict[str, str]:
     """起動しているかを確かめる。"""
@@ -42,10 +47,11 @@ def healthz() -> dict[str, str]:
 @app.get("/articles")
 def articles_of_day(
     store: Annotated[ArticleStore, Depends(get_store)],
+    now: Annotated[datetime, Depends(now_utc)],
     day: Annotated[str | None, Query(alias="date", pattern=r"^\d{4}-\d{2}-\d{2}$")] = None,
 ) -> DayDigest:
     """指定した日本時間の日付 (省略すれば今日) に集めた記事を、スコアの高い順に返す。"""
-    today = date_jst(datetime.now(UTC))
+    today = date_jst(now)
     if day is None:
         day = today
     else:

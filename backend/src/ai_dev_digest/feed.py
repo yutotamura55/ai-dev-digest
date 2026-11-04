@@ -5,6 +5,7 @@ from __future__ import annotations
 import calendar
 import ipaddress
 import logging
+import socket
 from datetime import UTC, datetime
 from typing import Any
 
@@ -31,11 +32,21 @@ class FeedError(Exception):
     """フィードや記事ページを取得または解析できなかった。"""
 
 
-def check_url(url: httpx.URL) -> None:
-    """https で、内部の宛先でない URL だけを許す。リダイレクトの各段でも呼ぶ。
+def resolve_addresses(host: str) -> list[str]:
+    """ホスト名を DNS で引き、IP アドレスの一覧を返す。引けなければ FeedError。"""
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror as error:
+        raise FeedError(f"could not resolve the host: {host}") from error
+    return [str(info[4][0]) for info in infos]
 
-    ホスト名を DNS で引いた結果までは確かめない。内部のアドレスに解決される名前は、
-    実行環境のネットワークの設定 (#3) で外への通信だけに絞って防ぐ。
+
+def check_url(url: httpx.URL) -> None:
+    """https で、内部の宛先に向かわない URL だけを許す。リダイレクトの各段でも呼ぶ。
+
+    記事の URL はフィードが決めるため、ホスト名が内部のアドレス (メタデータサーバーなど) に
+    解決される場合も拒む。確かめてから接続するまでの間に解決先が変わる可能性は残るので、
+    実行環境のネットワークの設定 (#3) でも外への通信だけに絞る。
     """
     if url.scheme != "https":
         raise FeedError(f"only https URLs are allowed: {url}")
@@ -43,10 +54,10 @@ def check_url(url: httpx.URL) -> None:
     if host in BLOCKED_HOSTS or host.endswith((".internal", ".localhost")):
         raise FeedError(f"the host is not allowed: {url}")
     try:
-        address = ipaddress.ip_address(host)
+        addresses = [ipaddress.ip_address(host)]
     except ValueError:
-        return
-    if not address.is_global:
+        addresses = [ipaddress.ip_address(address) for address in resolve_addresses(host)]
+    if not addresses or not all(address.is_global for address in addresses):
         raise FeedError(f"the host is not allowed: {url}")
 
 
@@ -56,7 +67,10 @@ def fetch_url(client: httpx.Client, url: str, max_bytes: int) -> bytes:
     リダイレクトは 1 段ずつ宛先を確かめてからたどる。HTTP の失敗、許さない宛先、
     上限を超える本文は FeedError にする。本文は上限を超えた時点で読むのをやめる。
     """
-    target = httpx.URL(url)
+    try:
+        target = httpx.URL(url)
+    except httpx.InvalidURL as error:
+        raise FeedError(f"invalid URL: {url}") from error
     for _ in range(MAX_REDIRECTS + 1):
         check_url(target)
         try:
@@ -94,7 +108,8 @@ def _read_limited(response: httpx.Response, url: str, max_bytes: int) -> bytes:
 def parse_feed(body: bytes, source: str) -> list[FeedEntry]:
     """フィードの本文から項目の一覧を作る。
 
-    題名か URL のない項目は飛ばす。公開日時のない項目も、新着かどうかを判定できないため飛ばす。
+    題名がない項目と、URL が http(s) の形でない項目は飛ばす。公開日時のない項目も、
+    新着かどうかを判定できないため飛ばす。
     """
     parsed = feedparser.parse(body)
     if parsed.get("bozo") and not parsed.get("entries"):
@@ -104,7 +119,7 @@ def parse_feed(body: bytes, source: str) -> list[FeedEntry]:
     for entry in parsed.get("entries", []):
         title = str(entry.get("title", "")).strip()
         url = str(entry.get("link", "")).strip()
-        if not title or not url.startswith(("https://", "http://")):
+        if not title or not _is_web_url(url):
             continue
         published_at = _published_at(entry)
         if published_at is None:
@@ -122,6 +137,15 @@ def parse_feed(body: bytes, source: str) -> list[FeedEntry]:
     if undated:
         logger.warning("%s: skipped %d entries without a publication date", source, undated)
     return entries
+
+
+def _is_web_url(url: str) -> bool:
+    """http か https の、形の正しい URL か。壊れた URL は後の取得や画面の表示で失敗する。"""
+    try:
+        parsed = httpx.URL(url)
+    except httpx.InvalidURL:
+        return False
+    return parsed.scheme in ("https", "http") and bool(parsed.host)
 
 
 def _published_at(entry: Any) -> datetime | None:

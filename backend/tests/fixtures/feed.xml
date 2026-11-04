@@ -31,5 +31,10 @@
       <link>javascript:alert(1)</link>
       <pubDate>Mon, 02 Nov 2026 09:00:00 GMT</pubDate>
     </item>
+    <item>
+      <title>Broken link</title>
+      <link>https://example.com:bad/news/broken</link>
+      <pubDate>Mon, 02 Nov 2026 09:00:00 GMT</pubDate>
+    </item>
   </channel>
 </rss>

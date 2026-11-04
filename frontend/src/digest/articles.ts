@@ -85,6 +85,15 @@ export function formatTimeInTokyo(iso: string): string {
   return timeFormat.format(new Date(iso));
 }
 
+// 原文へのリンクに添えるホスト名。URL として読めなければ URL をそのまま返す。
+export function hostnameOf(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url;
+  }
+}
+
 // API から 1 日分の記事を取得する。date を省略すると API が日本時間の今日を返す。
 // 失敗したら例外を投げ、画面のエラー表示 (app/error.tsx) に任せる。
 // apiBaseUrl にパスが付いていても (例: https://example.com/api) そのパスの下を読む。

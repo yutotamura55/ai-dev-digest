@@ -29,6 +29,12 @@ def message(text: str, stop_reason: str = "end_turn") -> dict[str, Any]:
     }
 
 
+def articles_in(request: dict[str, Any]) -> Any:
+    """リクエストの本文から、<articles> で囲んだ JSON を取り出す。"""
+    content = request["messages"][0]["content"]
+    return json.loads(content.split("<articles>\n")[1].split("\n</articles>")[0])
+
+
 def summarizer(
     respond: Callable[[dict[str, Any]], httpx2.Response], model: str = "claude-sonnet-5-5"
 ) -> tuple[ClaudeSummarizer, list[dict[str, Any]]]:
@@ -65,7 +71,12 @@ def test_judge_returns_scores_of_relevant_entries_only() -> None:
     assert len(requests) == 1
     assert requests[0]["model"] == "claude-sonnet-5-5"
     assert requests[0]["output_config"]["effort"] == "low"
-    assert "[1] 発信元: Example\n題名: Event" in requests[0]["messages"][0]["content"]
+    # 記事は JSON のデータとして <articles> の中に渡し、指示には信頼しないことを書く。
+    assert articles_in(requests[0]) == [
+        {"index": 0, "source": "Example", "title": "New model", "excerpt": ""},
+        {"index": 1, "source": "Example", "title": "Event", "excerpt": ""},
+    ]
+    assert "信頼できないデータ" in requests[0]["system"]
 
 
 def test_judge_ignores_an_index_outside_the_batch() -> None:
@@ -77,7 +88,7 @@ def test_judge_ignores_an_index_outside_the_batch() -> None:
 
 def test_judge_splits_many_entries_into_batches() -> None:
     def respond(body: dict[str, Any]) -> httpx2.Response:
-        count = body["messages"][0]["content"].count("\n題名: ")
+        count = len(articles_in(body))
         items = [{"index": i, "relevant": True, "score": 1} for i in range(count)]
         return httpx2.Response(200, json=message(json.dumps({"items": items})))
 
@@ -96,7 +107,7 @@ def test_judge_keeps_the_batches_that_succeeded_when_one_fails() -> None:
         calls += 1
         if calls == 1:
             return httpx2.Response(500, json={"type": "error", "error": {}})
-        count = body["messages"][0]["content"].count("\n題名: ")
+        count = len(articles_in(body))
         items = [{"index": i, "relevant": True, "score": 1} for i in range(count)]
         return httpx2.Response(200, json=message(json.dumps({"items": items})))
 
@@ -124,10 +135,12 @@ def test_summarize_returns_the_japanese_summary() -> None:
 
     assert result.summary_ja == "要約です。"
     assert result.detail_ja == ["点 1", "点 2"]
-    content = requests[0]["messages"][0]["content"]
-    assert "題名: New model" in content
+    [record] = articles_in(requests[0])
+    assert record["title"] == "New model"
+    assert record["published_at"] == "2026-11-04T01:00:00+00:00"
     # 本文は上限で切って渡す。
-    assert content.split("本文:\n")[1] == "x" * SUMMARY_INPUT_CHARS
+    assert record["body"] == "x" * SUMMARY_INPUT_CHARS
+    assert "信頼できないデータ" in requests[0]["system"]
     assert requests[0]["output_config"]["effort"] == "medium"
     assert requests[0]["output_config"]["format"]["type"] == "json_schema"
 

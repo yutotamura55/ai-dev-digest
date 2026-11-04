@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
 
-from ai_dev_digest.api import app, get_store
-from ai_dev_digest.models import date_jst
-from tests.conftest import FakeArticleStore, article
+from ai_dev_digest.api import app, get_store, now_utc
+from tests.conftest import NOW, FakeArticleStore, article
+
+TODAY = "2026-11-04"  # NOW (UTC 01:00) の日本時間の日付
 
 
 @pytest.fixture
@@ -21,6 +21,7 @@ def store() -> FakeArticleStore:
 @pytest.fixture
 def api(store: FakeArticleStore) -> Iterator[TestClient]:
     app.dependency_overrides[get_store] = lambda: store
+    app.dependency_overrides[now_utc] = lambda: NOW
     try:
         yield TestClient(app)
     finally:
@@ -43,7 +44,7 @@ def test_api_returns_the_articles_of_a_date_by_score(
     assert response.status_code == 200
     body = response.json()
     assert body["date"] == "2026-11-03"
-    assert body["today"] == date_jst(datetime.now(UTC))
+    assert body["today"] == TODAY
     assert [a["url"] for a in body["articles"]] == [
         "https://example.com/high",
         "https://example.com/low",
@@ -54,13 +55,17 @@ def test_api_returns_the_articles_of_a_date_by_score(
 
 
 def test_api_defaults_to_today_in_japan_time(store: FakeArticleStore, api: TestClient) -> None:
-    today = date_jst(datetime.now(UTC))
-    store.save([article(fetched_date_jst=today)])
+    store.save(
+        [
+            article(fetched_date_jst=TODAY),
+            article(url="https://example.com/old", fetched_date_jst="2026-11-03"),
+        ]
+    )
 
     body = api.get("/articles").json()
 
-    assert body["date"] == today
-    assert body["today"] == today
+    assert body["date"] == TODAY
+    assert body["today"] == TODAY
     assert len(body["articles"]) == 1
 
 

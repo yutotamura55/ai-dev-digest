@@ -127,9 +127,12 @@ def run(
     relevant.sort(key=lambda entry: (-scores[entry.url], entry.url))
     result.relevant = len(relevant)
 
-    # 要約に失敗した記事は飛ばし、次の候補で埋める。
+    # 要約に失敗した記事は飛ばし、次の候補で埋める。枠は保存を試みた件数で数える。
+    # 保存済みだった (別の実行が先に保存した) 記事も枠を使ったことにし、2 つの実行が重なっても
+    # その日の件数が上限の 2 倍にならないようにする。
+    filled = 0
     for entry in relevant:
-        if result.saved >= remaining:
+        if filled >= remaining:
             break
         body = article_body(client, by_name[entry.source], entry)
         try:
@@ -150,6 +153,7 @@ def run(
             score=scores[entry.url],
         )
         result.saved += store.save([article])
+        filled += 1
     logger.info(
         "saved %d new article(s): %d candidates, %d relevant, %d source(s) failed, "
         "%d article(s) failed",

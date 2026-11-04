@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import { type Article, formatTimeInTokyo } from "@/digest/articles";
+import { type Article, formatTimeInTokyo, hostnameOf } from "@/digest/articles";
 
 // 1 件の記事のカード。押すと同じページ内で広がり、詳細と原文へのリンクを表示する。
 export function ArticleCard({ article }: { article: Article }) {
@@ -38,7 +38,7 @@ export function ArticleCard({ article }: { article: Article }) {
             ))}
           </ul>
           <a href={article.url} target="_blank" rel="noopener noreferrer">
-            原文を読む ({new URL(article.url).hostname})
+            原文を読む ({hostnameOf(article.url)})
           </a>
         </div>
       )}

@@ -5,6 +5,7 @@ import {
   fetchDigest,
   formatDateJa,
   formatTimeInTokyo,
+  hostnameOf,
   isValidDate,
   shiftDate,
 } from "./articles";
@@ -50,6 +51,13 @@ describe("formatTimeInTokyo", () => {
   it("shows the publication time in Japan time", () => {
     // 2026-11-03 15:30 UTC は日本時間で 11 月 4 日 0:30。
     expect(formatTimeInTokyo("2026-11-03T15:30:00Z")).toBe("11/4 00:30");
+  });
+});
+
+describe("hostnameOf", () => {
+  it("returns the host of a URL and the input when it is not a URL", () => {
+    expect(hostnameOf("https://example.com/news/1?x=1")).toBe("example.com");
+    expect(hostnameOf("not a url")).toBe("not a url");
   });
 });
 

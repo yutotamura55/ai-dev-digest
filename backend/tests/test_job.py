@@ -2,14 +2,24 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import timedelta
 
 import httpx
 import pytest
 
 from ai_dev_digest import job
+from ai_dev_digest.models import Article
 from ai_dev_digest.sources import Source
-from tests.conftest import NOW, FakeArticleStore, FakeSummarizer, item, routing_client, rss
+from tests.conftest import (
+    NOW,
+    FakeArticleStore,
+    FakeSummarizer,
+    article,
+    item,
+    routing_client,
+    rss,
+)
 
 OPENAI = Source("OpenAI", "https://openai.example/rss.xml", fetch_body=False)
 GOOGLE = Source("Google", "https://google.example/rss.xml")
@@ -200,6 +210,52 @@ def test_run_counts_the_limit_per_japan_date_across_runs() -> None:
     assert job.run(client, store, summarizer, [OPENAI], now=later, limit=3).saved == 0
     assert len(summarizer.judged) == 2
     assert len(store.by_date("2026-11-04")) == 3
+
+
+class StaleViewStore(FakeArticleStore):
+    """別の実行が先に保存した記事を、existing_ids と by_date では見ない保存先。
+
+    2 つの実行が同時に始まり、どちらも「まだ何もない」と見た場面を再現する。save は本物と同じく、
+    保存済みの記事を数えない。
+    """
+
+    def existing_ids(self, ids: Iterable[str]) -> set[str]:
+        return set()
+
+    def by_date(self, date_jst: str) -> list[Article]:
+        return []
+
+
+def test_run_does_not_exceed_the_limit_when_another_run_saved_first() -> None:
+    feed = rss(
+        [
+            item("Model A", "https://openai.example/a", RECENT),
+            item("Model B", "https://openai.example/b", RECENT),
+            item("Model C", "https://openai.example/c", RECENT),
+            item("Model D", "https://openai.example/d", RECENT),
+        ]
+    )
+    client, _ = routing_client({OPENAI.feed_url: feed})
+    store = StaleViewStore()
+    # 先に走った実行が A と B を保存した。
+    store.articles.update(
+        {
+            a.id: a
+            for a in (
+                article(url="https://openai.example/a"),
+                article(url="https://openai.example/b"),
+            )
+        }
+    )
+
+    result = job.run(client, store, FakeSummarizer(), [OPENAI], now=NOW, limit=2)
+
+    # A と B は保存済みなので新しくは保存せず、枠を使ったことにして C と D には進まない。
+    assert result.saved == 0
+    assert sorted(a.url for a in store.articles.values()) == [
+        "https://openai.example/a",
+        "https://openai.example/b",
+    ]
 
 
 def test_run_stops_before_the_llm_when_there_is_nothing_new() -> None:

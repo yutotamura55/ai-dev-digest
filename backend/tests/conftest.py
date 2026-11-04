@@ -9,12 +9,22 @@ from pathlib import Path
 import httpx
 import pytest
 
+from ai_dev_digest import feed
 from ai_dev_digest.llm import LLMError
 from ai_dev_digest.models import Article, FeedEntry, Summary
 from ai_dev_digest.store import sort_for_display
 
 FIXTURES = Path(__file__).parent / "fixtures"
 NOW = datetime(2026, 11, 4, 1, 0, tzinfo=UTC)  # 日本時間 2026-11-04 10:00
+# DNS を実際に引く実装。下の自動の差し替えより前に取っておき、その実装自体のテストで使う。
+REAL_RESOLVE_ADDRESSES = feed.resolve_addresses
+PUBLIC_ADDRESS = "93.184.216.34"
+
+
+@pytest.fixture(autouse=True)
+def public_dns(monkeypatch: pytest.MonkeyPatch) -> None:
+    """テストでは DNS を引かず、どのホスト名もグローバルなアドレスに解決されたことにする。"""
+    monkeypatch.setattr(feed, "resolve_addresses", lambda _host: [PUBLIC_ADDRESS])
 
 
 class FakeArticleStore:
