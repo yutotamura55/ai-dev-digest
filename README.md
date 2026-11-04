@@ -71,7 +71,7 @@ cp .env.example .env
 docker compose run --rm job
 ```
 
-`saved 1 article(s)` と出たら、<http://localhost:8000/articles> に記事が JSON で返り、<http://localhost:3000> に日付と題名が表示されます。
+`saved 1 new article(s)` と出たら、<http://localhost:8000/articles> に記事が JSON で返り、<http://localhost:3000> に日付と題名が表示されます。
 エミュレーターのデータは、コンテナを止めると消えます。
 止めるには `docker compose down` を実行します。
 
