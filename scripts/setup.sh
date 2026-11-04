@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # lockfile のとおりに依存を入れる。開発用のコンテナの中で動かす。
-#   scripts/setup.sh          Python と Node.js の両方 (scripts/check.sh が呼ぶ)
-#   scripts/setup.sh python   Python だけ (compose.yaml の api と job が呼ぶ)
+#   scripts/setup.sh          検査の道具 (tools/) を含む全部 (scripts/check.sh が呼ぶ)
+#   scripts/setup.sh python   backend の Python だけ (compose.yaml の api と job が呼ぶ)
 #   scripts/setup.sh node     Node.js だけ (compose.yaml の web が呼ぶ)
 # api と web は同時に起動するため、同じ依存を 2 つのコンテナが同時に入れないよう対象を分けている。
 set -euo pipefail
@@ -18,6 +18,8 @@ esac
 
 if [[ "$target" != node ]]; then
   uv sync --project backend --locked --quiet
+fi
+if [[ "$target" == all ]]; then
   uv sync --project tools --locked --quiet
 fi
 
