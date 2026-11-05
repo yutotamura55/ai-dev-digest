@@ -229,8 +229,9 @@ def test_summarize_checks_evidence_against_the_body_it_sent() -> None:
         ("Old models retire on January 2.", "Old models retire on January 1.", False),
         ("", "Old models retire on January 1.", False),
         ("   ", "Old models retire on January 1.", False),
-        # 本文にあっても、20 字より短い引用は根拠にしない。
-        ("Old models retire", "Old models retire on January 1.", False),
+        # 短い一文は通し、本文にあっても語だけの短い引用は根拠にしない。
+        ("The API is free.", "The API is free. Old models retire on January 1.", True),
+        ("January 1.", "Old models retire on January 1.", False),
         # 大文字と小文字、引用符の違いはそろえない。
         ("old models retire on january 1.", "Old models retire on January 1.", False),
         ("it's a new model today.", "it\u2019s a new model today.", False),
