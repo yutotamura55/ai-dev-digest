@@ -75,6 +75,10 @@ main > h2 {
   text-decoration: underline;
 }
 
+.notice {
+  margin-bottom: 1rem;
+}
+
 .cards {
   display: flex;
   flex-direction: column;
@@ -114,9 +118,14 @@ main > h2 {
   margin-bottom: 0.25rem;
 }
 
+/* 補足の文字 (注意書き、記事の発信元と日時) は、本文より小さく薄くする。 */
+.notice,
 .card-meta {
   font-size: 0.85rem;
   opacity: 0.75;
+}
+
+.card-meta {
   margin-bottom: 0.5rem;
 }
 
