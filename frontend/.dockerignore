@@ -1,0 +1,7 @@
+# 本番用のイメージ (frontend/Dockerfile) に要らないもの。
+node_modules/
+.next/
+coverage/
+*.tsbuildinfo
+.env*
+gha-creds-*.json

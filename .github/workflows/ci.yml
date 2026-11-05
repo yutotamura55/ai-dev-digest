@@ -11,7 +11,11 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # PR では古い実行を止める。main では、デプロイを途中で止めないよう、止めずに順に実行する。
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  GCP_REGION: asia-northeast1
 
 jobs:
   checks:
@@ -30,3 +34,119 @@ jobs:
       - name: Run scripts/check.sh in the dev container
         run: |
           HOST_UID="$(id -u)" HOST_GID="$(id -g)" docker compose run --rm dev scripts/check.sh
+
+  images:
+    name: Build images
+    # main へのマージでは deploy が同じイメージを作るので、PR だけで作れるかを確かめる。
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build the production images
+        run: |
+          docker build --tag ai-dev-digest-backend:ci backend
+          docker build --tag ai-dev-digest-web:ci frontend
+
+  plan:
+    name: Terraform plan
+    # GCP の設定 (リポジトリ変数) があり、このリポジトリのブランチから出た PR だけで動かす。
+    # fork と Dependabot の PR の workflow は OIDC のトークンを受け取れない。
+    if: >-
+      github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.full_name == github.repository
+      && github.event.pull_request.user.login != 'dependabot[bot]'
+      && vars.GCP_PROJECT_ID != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write # GCP の Workload Identity Federation に渡す OIDC のトークンを受け取る
+    env:
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # サービスアカウントの鍵を使わず、Workload Identity Federation で読み取り専用の planner になる。
+      - id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+          workload_identity_provider: projects/${{ vars.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/github/providers/ai-dev-digest
+          service_account: github-planner@${{ vars.GCP_PROJECT_ID }}.iam.gserviceaccount.com
+      - name: Build the dev container
+        run: |
+          HOST_UID="$(id -u)" HOST_GID="$(id -g)" docker compose build dev
+      - name: Run terraform plan for infra/app
+        env:
+          # auth が作業ディレクトリに作った認証情報。コンテナの中では /work の下に見える。
+          CREDENTIALS_FILE: ${{ steps.auth.outputs.credentials_file_path }}
+        run: |
+          HOST_UID="$(id -u)" HOST_GID="$(id -g)" docker compose run --rm --no-deps \
+            -e GCP_PROJECT_ID \
+            -e GOOGLE_APPLICATION_CREDENTIALS="/work/$(basename "$CREDENTIALS_FILE")" \
+            dev scripts/terraform.sh app plan-ci
+
+  deploy:
+    name: Deploy
+    needs: checks
+    # main へのマージ (と main での手動の実行) で、GCP の設定 (リポジトリ変数) があるときだけ動かす。
+    # Terraform の apply はここでは行わない。インフラの変更は利用者が手元で apply する (README)。
+    if: >-
+      github.event_name != 'pull_request'
+      && github.ref == 'refs/heads/main'
+      && vars.GCP_PROJECT_ID != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write # GCP の Workload Identity Federation に渡す OIDC のトークンを受け取る
+    concurrency:
+      group: deploy
+      cancel-in-progress: false
+    env:
+      CLOUDSDK_CORE_DISABLE_PROMPTS: "1"
+      IMAGE_REPOSITORY: asia-northeast1-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/ai-dev-digest
+      IMAGE_TAG: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # main ブランチの workflow だけがなれる deployer になる (infra/bootstrap/github.tf)。
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+          workload_identity_provider: projects/${{ vars.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/github/providers/ai-dev-digest
+          service_account: github-deployer@${{ vars.GCP_PROJECT_ID }}.iam.gserviceaccount.com
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+        with:
+          # compose.yaml の gcloud と Firestore エミュレーターと同じ版。
+          version: "592.0.0"
+      - name: Build and push the production images
+        run: |
+          gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev"
+          docker build --tag "$IMAGE_REPOSITORY/backend:$IMAGE_TAG" backend
+          docker build --tag "$IMAGE_REPOSITORY/web:$IMAGE_TAG" frontend
+          docker push "$IMAGE_REPOSITORY/backend:$IMAGE_TAG"
+          docker push "$IMAGE_REPOSITORY/web:$IMAGE_TAG"
+      - name: Update the Cloud Run services and job
+        run: |
+          gcloud run services update ai-dev-digest-api --region "$GCP_REGION" \
+            --image "$IMAGE_REPOSITORY/backend:$IMAGE_TAG"
+          gcloud run services update ai-dev-digest-web --region "$GCP_REGION" \
+            --image "$IMAGE_REPOSITORY/web:$IMAGE_TAG"
+          gcloud run jobs update ai-dev-digest-collect --region "$GCP_REGION" \
+            --image "$IMAGE_REPOSITORY/backend:$IMAGE_TAG"
+      - name: Write the deployed URLs to the summary
+        run: |
+          web_url="$(gcloud run services describe ai-dev-digest-web --region "$GCP_REGION" --format='value(status.url)')"
+          api_url="$(gcloud run services describe ai-dev-digest-api --region "$GCP_REGION" --format='value(status.url)')"
+          {
+            echo "### Deployed $IMAGE_TAG"
+            echo
+            echo "- web: $web_url"
+            echo "- api: $api_url"
+          } >> "$GITHUB_STEP_SUMMARY"

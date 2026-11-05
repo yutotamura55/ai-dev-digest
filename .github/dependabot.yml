@@ -16,7 +16,12 @@ updates:
       npm-minor-and-patch:
         update-types: [minor, patch]
   - package-ecosystem: docker
-    directory: /
+    # 開発用 (/) と本番用 (backend、frontend) の Dockerfile。
+    directories: ["/", "/backend", "/frontend"]
+    schedule:
+      interval: weekly
+  - package-ecosystem: terraform
+    directories: ["/infra/bootstrap", "/infra/app", "/infra/modules/cloud_run_service"]
     schedule:
       interval: weekly
   - package-ecosystem: docker-compose

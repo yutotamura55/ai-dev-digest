@@ -218,3 +218,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Terraform (infra/)。ロックファイル (.terraform.lock.hcl) はコミットする。
+.terraform/
+*.tfplan
+
+# google-github-actions/auth が CI の作業ディレクトリに作る認証情報
+gha-creds-*.json

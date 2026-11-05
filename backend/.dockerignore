@@ -1,0 +1,11 @@
+# 本番用のイメージ (backend/Dockerfile) に要らないもの。
+.venv/
+**/__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+tests/
+.env
+gha-creds-*.json

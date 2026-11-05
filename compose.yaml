@@ -61,5 +61,34 @@ services:
     depends_on:
       - api
 
+  # GCP を操作する gcloud。認証情報は、ホストの ~/.config/ai-dev-digest/gcloud に置く (先に作っておく)。
+  # 使い方は README の「GCP に構築する」にある。
+  gcloud:
+    image: gcr.io/google.com/cloudsdktool/google-cloud-cli:592.0.0-slim@sha256:8a50079dfc4b164aa5e83926bef5f9b305b93e80f82d40fabd836da4830dd08e
+    profiles: [ops]
+    user: "${HOST_UID:?export HOST_UID=$(id -u) first}:${HOST_GID:?export HOST_GID=$(id -g) first}"
+    entrypoint: ["gcloud"]
+    environment:
+      CLOUDSDK_CONFIG: /gcloud
+      HOME: /tmp
+    volumes:
+      - ${HOME}/.config/ai-dev-digest/gcloud:/gcloud
+
+  # infra/ の Terraform を、上の gcloud でログインした認証情報 (ADC) で実行する：
+  #   docker compose run --rm infra <bootstrap|app> <plan|apply>
+  infra:
+    <<: *dev
+    profiles: [ops]
+    entrypoint: ["scripts/terraform.sh"]
+    environment:
+      GOOGLE_APPLICATION_CREDENTIALS: /gcloud/application_default_credentials.json
+      GCP_PROJECT_ID: ${GCP_PROJECT_ID:-}
+      GCP_BILLING_ACCOUNT: ${GCP_BILLING_ACCOUNT:-}
+    volumes:
+      - .:/work
+      - cache:/cache
+      - ${HOME}/.config/ai-dev-digest/gcloud:/gcloud:ro
+    depends_on: !reset []
+
 volumes:
   cache:
