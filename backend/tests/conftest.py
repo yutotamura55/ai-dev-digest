@@ -54,13 +54,18 @@ class FakeSummarizer:
 
     scores: 題名に含まれる語 → スコア。どの語も含まない項目は関係なしとする。
     failing_urls: summarize で LLMError を起こす URL。
+    unsupported_details: どの要約にも付ける、根拠がなく捨てた項目の数。
     """
 
     def __init__(
-        self, scores: dict[str, int] | None = None, failing_urls: Iterable[str] = ()
+        self,
+        scores: dict[str, int] | None = None,
+        failing_urls: Iterable[str] = (),
+        unsupported_details: int = 0,
     ) -> None:
         self.scores = scores if scores is not None else {"model": 90}
         self.failing_urls = set(failing_urls)
+        self.unsupported_details = unsupported_details
         self.judged: list[list[FeedEntry]] = []
         self.summarized: list[tuple[FeedEntry, str]] = []
 
@@ -81,6 +86,7 @@ class FakeSummarizer:
             title_ja=f"{entry.title} の訳",
             summary_ja=f"{entry.title} の要約",
             detail_ja=[f"{body[:20]} の詳細"],
+            unsupported_details=self.unsupported_details,
         )
 
 

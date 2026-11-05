@@ -41,6 +41,10 @@ def test_summary_detail_ja_cleans_items_and_cuts_at_the_maximum(
     assert Summary(title_ja="t", summary_ja="s", detail_ja=[]).detail_ja == []
 
 
+def test_summary_counts_no_unsupported_details_by_default() -> None:
+    assert Summary(title_ja="t", summary_ja="s", detail_ja=[]).unsupported_details == 0
+
+
 def test_summary_detail_ja_normalizes_whitespace_and_removes_duplicates() -> None:
     summary = Summary(
         title_ja="t", summary_ja="s", detail_ja=["  料金は\n$2。 ", "料金は $2。", "期日は 11 月。"]

@@ -103,6 +103,23 @@ def test_run_reads_missing_dates_from_the_page_for_sources_that_allow_it() -> No
     assert summarizer.summarized[0][1] == "Body text of the post."
 
 
+def test_run_counts_the_details_dropped_without_evidence() -> None:
+    feed = rss(
+        [
+            item("Model A", "https://openai.example/a", RECENT),
+            item("Model B", "https://openai.example/b", RECENT),
+        ]
+    )
+    client, _ = routing_client({OPENAI.feed_url: feed})
+    summarizer = FakeSummarizer(unsupported_details=2)
+
+    result = job.run(client, FakeArticleStore(), summarizer, [OPENAI], now=NOW, limit=10)
+
+    # 保存した 2 件の要約で 2 つずつ捨てた分を合計する。
+    assert result.saved == 2
+    assert result.unsupported_details == 4
+
+
 def test_run_keeps_a_date_only_publication_of_the_oldest_day_in_the_window() -> None:
     # NOW は 2026-11-04 01:00 UTC。窓の始まりは 11-02 01:00 UTC で、日付だけの 11-02 (0:00 UTC) は
     # そのままでは外れるが、その日のうちの公開なので 1 日の余裕で含める。11-01 は含めない。

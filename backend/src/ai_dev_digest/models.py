@@ -21,6 +21,11 @@ def article_id(url: str) -> str:
     return hashlib.sha256(url.encode()).hexdigest()[:32]
 
 
+def collapse_whitespace(text: str) -> str:
+    """空白の連続 (改行を含む) を 1 つの空白にし、前後の空白を除く。"""
+    return " ".join(text.split())
+
+
 def date_jst(moment: datetime) -> str:
     """日時の日本時間の日付 (YYYY-MM-DD)。日付の区切りはすべてこれで決める。"""
     return moment.astimezone(TOKYO).date().isoformat()
@@ -58,8 +63,10 @@ class Summary(BaseModel):
     title_ja: str
     # 2〜3 文の短い要約。
     summary_ja: str
-    # 箇条書きの詳細。
+    # 箇条書きの詳細。本文に根拠の一文がある項目だけ (llm.py の照合)。
     detail_ja: list[str]
+    # 本文に根拠がなく捨てた詳細の項目の数。記事には保存せず、ログと実行の結果に使う。
+    unsupported_details: int = 0
 
     @field_validator("detail_ja")
     @classmethod
@@ -71,7 +78,7 @@ class Summary(BaseModel):
         """
         items: list[str] = []
         for raw in value:
-            item = " ".join(raw.split())
+            item = collapse_whitespace(raw)
             if item and item not in items:
                 items.append(item)
         if len(items) > MAX_DETAIL_ITEMS:
@@ -86,7 +93,7 @@ class Summary(BaseModel):
         空の訳を保存すると、画面は「訳なし」として原文だけを出す。LLM の応答の不備は
         LLMError にして、次の実行で生成し直す。
         """
-        cleaned = " ".join(value.split())
+        cleaned = collapse_whitespace(value)
         if not cleaned:
             raise ValueError("title_ja must not be empty")
         return cleaned
