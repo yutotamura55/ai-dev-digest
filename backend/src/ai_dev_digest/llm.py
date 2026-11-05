@@ -15,7 +15,7 @@ from typing import Literal, Protocol
 import anthropic
 from pydantic import BaseModel, Field, ValidationError
 
-from ai_dev_digest.models import MAX_DETAIL_ITEMS, FeedEntry, Summary
+from ai_dev_digest.models import MAX_DETAIL_ITEMS, FeedEntry, Summary, collapse_whitespace
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +27,9 @@ JUDGE_EXCERPT_CHARS = 300
 # 要約に渡す本文の文字数の上限 (およそ 4,000 トークン)。
 SUMMARY_INPUT_CHARS = 12_000
 MAX_OUTPUT_TOKENS = 4_000
+# 根拠の一文の最小の長さ (空白を整えた後の文字数)。"the" のような短い語はどの本文にもあり根拠に
+# ならないので、これより短い evidence は根拠なしとする。
+MIN_EVIDENCE_CHARS = 20
 
 # 記事の題名や本文は外部のサイトから取得したデータで、指示を含んでいることがある。
 # 指示 (system) と記事のデータを分け、データの中の指示に従わないことを両方の指示に書く。
@@ -96,19 +99,14 @@ class SummaryResponse(BaseModel):
     details: list[DetailItem]
 
 
-def _normalize(text: str) -> str:
-    """空白の連続 (改行を含む) を 1 つの空白にする。照合で空白の違いを無視するため。"""
-    return " ".join(text.split())
-
-
 def supported(evidence: str, body: str) -> bool:
-    """evidence が本文の書き写しか。空白の連続の違いだけを許し、空なら根拠なしとする。
+    """evidence が本文の書き写しか。空白の連続の違いだけを許し、短すぎれば根拠なしとする。
 
     LLM が本文にない内容を詳細に書くのを、追加の呼び出しなしで機械的に防ぐ (#21)。
     引用符やダッシュの違いはそろえない。実際の不一致を見てから決める。
     """
-    quote = _normalize(evidence)
-    return bool(quote) and quote in _normalize(body)
+    quote = collapse_whitespace(evidence)
+    return len(quote) >= MIN_EVIDENCE_CHARS and quote in collapse_whitespace(body)
 
 
 class Summarizer(Protocol):
@@ -177,18 +175,22 @@ class ClaudeSummarizer:
         prompt = "次の記事を日本語で要約してください。\n\n" + _articles_block([record])
         response = self._parse(SUMMARY_SYSTEM, prompt, SummaryResponse, effort="medium")
         # 根拠の一文が渡した本文にない項目は捨てる。照合の相手は、上限で切った後の本文にする。
+        # 本文の空白は 1 回だけ整える (supported は整えた本文をそのまま使える)。
+        text = collapse_whitespace(body)
         details: list[str] = []
         unsupported = 0
         for item in response.details:
-            if supported(item.evidence, body):
+            if supported(item.evidence, text):
                 details.append(item.text_ja)
                 continue
             unsupported += 1
+            # 応答は外部の記事から作られる。改行でログの行が分かれないよう空白を整え、
+            # 長い引用は切る。
             logger.warning(
                 "dropping a detail of %s without evidence in the body: %s (evidence: %s)",
                 entry.url,
-                item.text_ja,
-                item.evidence,
+                collapse_whitespace(item.text_ja),
+                collapse_whitespace(item.evidence)[:200],
             )
         try:
             return Summary(

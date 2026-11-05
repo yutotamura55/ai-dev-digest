@@ -137,8 +137,8 @@ def test_summarize_returns_the_japanese_summary() -> None:
         "title_ja": "新しいモデル",
         "summary_ja": "要約です。",
         "details": [
-            {"text_ja": "点 1", "evidence": "x" * 10},
-            {"text_ja": "点 2", "evidence": "xxx"},
+            {"text_ja": "点 1", "evidence": "x" * 20},
+            {"text_ja": "点 2", "evidence": "x" * 30},
         ],
     }
     llm, requests = summarizer(
@@ -184,7 +184,9 @@ def test_summarize_drops_details_whose_evidence_is_not_in_the_body(
                 "evidence": "Old models  retire on January 1.",
             },
             {"text_ja": "本文にない点。", "evidence": "Prices double next year."},
-            {"text_ja": "根拠のない点。", "evidence": ""},
+            # 本文にはあるが短すぎる引用は、根拠にしない。
+            {"text_ja": "短い根拠の点。", "evidence": "January 1."},
+            {"text_ja": "根拠の\nない点。", "evidence": ""},
         ],
     }
     llm, _ = summarizer(lambda _body: httpx2.Response(200, json=message(json.dumps(summary))))
@@ -193,12 +195,14 @@ def test_summarize_drops_details_whose_evidence_is_not_in_the_body(
         result = llm.summarize(entry(url="https://example.com/a"), body)
 
     assert result.detail_ja == ["料金は 2 ドル。", "旧モデルは 1 月 1 日に終了。"]
-    assert result.unsupported_details == 2
+    assert result.unsupported_details == 3
     assert (
-        "dropping a detail of https://example.com/a without evidence in the body: 本文にない点。"
-        in caplog.text
-    )
-    assert "根拠のない点。" in caplog.text
+        "dropping a detail of https://example.com/a without evidence in the body: "
+        "本文にない点。 (evidence: Prices double next year.)"
+    ) in caplog.text
+    assert "短い根拠の点。 (evidence: January 1.)" in caplog.text
+    # ログの行が分かれないよう、応答の改行は空白にする。
+    assert "根拠の ない点。 (evidence: )" in caplog.text
 
 
 def test_summarize_checks_evidence_against_the_body_it_sent() -> None:
@@ -221,13 +225,15 @@ def test_summarize_checks_evidence_against_the_body_it_sent() -> None:
     ("evidence", "body", "expected"),
     [
         ("Old models retire on January 1.", "Old models retire\non January 1.", True),
-        ("  Old models  retire ", "Old models retire on January 1.", True),
+        ("  Old models  retire on January 1. ", "Old models retire on January 1.", True),
         ("Old models retire on January 2.", "Old models retire on January 1.", False),
         ("", "Old models retire on January 1.", False),
         ("   ", "Old models retire on January 1.", False),
+        # 本文にあっても、20 字より短い引用は根拠にしない。
+        ("Old models retire", "Old models retire on January 1.", False),
         # 大文字と小文字、引用符の違いはそろえない。
-        ("old models retire", "Old models retire on January 1.", False),
-        ("it's", "it\u2019s new", False),
+        ("old models retire on january 1.", "Old models retire on January 1.", False),
+        ("it's a new model today.", "it\u2019s a new model today.", False),
     ],
 )
 def test_supported_allows_only_whitespace_differences(
