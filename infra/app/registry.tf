@@ -8,7 +8,10 @@ resource "google_artifact_registry_repository" "images" {
 
   cleanup_policy_dry_run = false
 
-  # 各イメージの新しい 2 版は残す。いま動いている版と、1 つ前に戻すための版。
+  # 各イメージの新しい 2 版は残す。ふつうは、いま動いている版と、1 つ前に戻すための版になる。
+  # push の後のデプロイ (Cloud Run の更新) が 2 回続けて失敗すると、動いている版が 3 番目に古くなり、
+  # 1 日後に消える。その場合も動いているリビジョンは止まらないが、その版をレジストリから
+  # デプロイし直せなくなる。デプロイの失敗は、その日のうちに直す。
   cleanup_policies {
     id     = "keep-recent"
     action = "KEEP"
