@@ -18,7 +18,7 @@ step "Install dependencies from the lockfiles"
 scripts/setup.sh
 
 step "Repository: Dockerfile, shell scripts, workflows"
-hadolint Dockerfile
+hadolint Dockerfile backend/Dockerfile frontend/Dockerfile
 shellcheck scripts/*.sh
 actionlint
 uv run --project tools --locked zizmor --offline .github/workflows
@@ -27,7 +27,17 @@ step "Repository: security static analysis (Semgrep CE)"
 # 規則は Semgrep の公開の規則集から実行時に取得する。リポジトリには同梱しない。
 uv run --project tools --locked semgrep scan --metrics=off --error --quiet \
   --config p/python --config p/typescript --config p/react --config p/nextjs \
-  --config p/dockerfile --config p/github-actions
+  --config p/dockerfile --config p/github-actions --config p/terraform
+
+step "Infrastructure (Terraform): format, validate, lint"
+# GCP には接続しない。provider はロックファイルの版だけを取る。
+mkdir -p "$TF_PLUGIN_CACHE_DIR"
+terraform fmt -check -recursive -diff infra
+for root in infra/bootstrap infra/app; do
+  terraform -chdir="$root" init -backend=false -input=false -lockfile=readonly >/dev/null
+  terraform -chdir="$root" validate -no-color
+done
+tflint --chdir=infra --recursive --config="$PWD/infra/.tflint.hcl"
 
 step "Backend (Python): format, lint, types, unused code, tests"
 (
