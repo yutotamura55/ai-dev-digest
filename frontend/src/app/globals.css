@@ -75,6 +75,12 @@ main > h2 {
   text-decoration: underline;
 }
 
+.notice {
+  font-size: 0.85rem;
+  opacity: 0.75;
+  margin-bottom: 1rem;
+}
+
 .cards {
   display: flex;
   flex-direction: column;
