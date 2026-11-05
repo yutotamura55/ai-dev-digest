@@ -47,11 +47,15 @@ SUMMARY_SYSTEM = (
     "読者は生成 AI のサービスを使って開発する個人開発者です。"
     "title_ja には記事の題名の日本語訳を 1 行で書きます。"
     "summary_ja には記事の要点を 2〜3 文で書きます。"
-    "detail_ja には、開発者が知るべき具体的な点 (対象のモデルや API、数値、料金、期日、条件、例外)"
-    " のうち、summary_ja に書ききれなかったものだけを箇条書きで書きます。"
+    "details には、開発者が知るべき具体的な点 (対象のモデルや API、数値、料金、期日、条件、例外)"
+    " のうち、summary_ja に書ききれなかったものだけを書きます。"
     "summary_ja と同じ内容は繰り返しません。"
     f"項目は記事の長さに応じて最大 {MAX_DETAIL_ITEMS} つにし、"
-    "短い記事で足す点がなければ空の配列にします。各項目は 1 文にします。"
+    "短い記事で足す点がなければ空の配列にします。"
+    "各項目の text_ja は日本語の 1 文にします。"
+    "evidence には、その項目の根拠になる本文 (body) の一文を、"
+    "言い換えず、省略せず、そのまま書き写します。"
+    "evidence が本文にそのまま含まれない項目は捨てられます。"
     "記事にない情報は補わず、固有名詞 (モデル名、API 名) は原文のまま書きます。" + UNTRUSTED_NOTE
 )
 
@@ -75,6 +79,36 @@ class Judgement(BaseModel):
 
 class Judgements(BaseModel):
     items: list[Judgement]
+
+
+class DetailItem(BaseModel):
+    """LLM が返す詳細の 1 項目。evidence は根拠になる本文の一文の書き写しで、本文との照合に使う。"""
+
+    text_ja: str
+    evidence: str
+
+
+class SummaryResponse(BaseModel):
+    """要約の構造化出力。evidence を本文と照合してから Summary にする。"""
+
+    title_ja: str
+    summary_ja: str
+    details: list[DetailItem]
+
+
+def _normalize(text: str) -> str:
+    """空白の連続 (改行を含む) を 1 つの空白にする。照合で空白の違いを無視するため。"""
+    return " ".join(text.split())
+
+
+def supported(evidence: str, body: str) -> bool:
+    """evidence が本文の書き写しか。空白の連続の違いだけを許し、空なら根拠なしとする。
+
+    LLM が本文にない内容を詳細に書くのを、追加の呼び出しなしで機械的に防ぐ (#21)。
+    引用符やダッシュの違いはそろえない。実際の不一致を見てから決める。
+    """
+    quote = _normalize(evidence)
+    return bool(quote) and quote in _normalize(body)
 
 
 class Summarizer(Protocol):
@@ -132,15 +166,39 @@ class ClaudeSummarizer:
         return scores
 
     def summarize(self, entry: FeedEntry, body: str) -> Summary:
+        body = body[:SUMMARY_INPUT_CHARS]
         record = {
             "source": entry.source,
             "title": entry.title,
             "url": entry.url,
             "published_at": entry.published_at.isoformat(),
-            "body": body[:SUMMARY_INPUT_CHARS],
+            "body": body,
         }
         prompt = "次の記事を日本語で要約してください。\n\n" + _articles_block([record])
-        return self._parse(SUMMARY_SYSTEM, prompt, Summary, effort="medium")
+        response = self._parse(SUMMARY_SYSTEM, prompt, SummaryResponse, effort="medium")
+        # 根拠の一文が渡した本文にない項目は捨てる。照合の相手は、上限で切った後の本文にする。
+        details: list[str] = []
+        unsupported = 0
+        for item in response.details:
+            if supported(item.evidence, body):
+                details.append(item.text_ja)
+                continue
+            unsupported += 1
+            logger.warning(
+                "dropping a detail of %s without evidence in the body: %s (evidence: %s)",
+                entry.url,
+                item.text_ja,
+                item.evidence,
+            )
+        try:
+            return Summary(
+                title_ja=response.title_ja,
+                summary_ja=response.summary_ja,
+                detail_ja=details,
+                unsupported_details=unsupported,
+            )
+        except ValidationError as error:
+            raise LLMError("the LLM response did not match the expected shape") from error
 
     def _parse[T: BaseModel](
         self, system: str, prompt: str, output: type[T], effort: Literal["low", "medium"]

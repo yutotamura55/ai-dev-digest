@@ -58,8 +58,10 @@ class Summary(BaseModel):
     title_ja: str
     # 2〜3 文の短い要約。
     summary_ja: str
-    # 箇条書きの詳細。
+    # 箇条書きの詳細。本文に根拠の一文がある項目だけ (llm.py の照合)。
     detail_ja: list[str]
+    # 本文に根拠がなく捨てた詳細の項目の数。記事には保存せず、ログと実行の結果に使う。
+    unsupported_details: int = 0
 
     @field_validator("detail_ja")
     @classmethod

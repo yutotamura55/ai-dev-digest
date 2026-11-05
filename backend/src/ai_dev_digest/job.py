@@ -98,6 +98,8 @@ class Result:
     failed_sources: list[str] = field(default_factory=list)
     # 要約に失敗して飛ばした記事の URL。
     failed_articles: list[str] = field(default_factory=list)
+    # 本文に根拠がなく捨てた詳細の項目の数 (#21)。
+    unsupported_details: int = 0
 
 
 def collect_entries(
@@ -264,15 +266,17 @@ def run(
             score=scores[entry.url],
         )
         result.saved += store.save([article])
+        result.unsupported_details += summary.unsupported_details
         filled += 1
     logger.info(
         "saved %d new article(s): %d candidates, %d relevant, %d source(s) failed, "
-        "%d article(s) failed",
+        "%d article(s) failed, %d detail(s) dropped without evidence",
         result.saved,
         result.candidates,
         result.relevant,
         len(result.failed_sources),
         len(result.failed_articles),
+        result.unsupported_details,
     )
     return result
 

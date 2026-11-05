@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Callable
 from typing import Any
 
@@ -10,7 +11,13 @@ import anthropic
 import httpx2
 import pytest
 
-from ai_dev_digest.llm import JUDGE_BATCH_SIZE, SUMMARY_INPUT_CHARS, ClaudeSummarizer, LLMError
+from ai_dev_digest.llm import (
+    JUDGE_BATCH_SIZE,
+    SUMMARY_INPUT_CHARS,
+    ClaudeSummarizer,
+    LLMError,
+    supported,
+)
 from tests.conftest import entry
 
 
@@ -129,7 +136,10 @@ def test_summarize_returns_the_japanese_summary() -> None:
     summary = {
         "title_ja": "新しいモデル",
         "summary_ja": "要約です。",
-        "detail_ja": ["点 1", "点 2"],
+        "details": [
+            {"text_ja": "点 1", "evidence": "x" * 10},
+            {"text_ja": "点 2", "evidence": "xxx"},
+        ],
     }
     llm, requests = summarizer(
         lambda _body: httpx2.Response(200, json=message(json.dumps(summary)))
@@ -140,6 +150,7 @@ def test_summarize_returns_the_japanese_summary() -> None:
     assert result.title_ja == "新しいモデル"
     assert result.summary_ja == "要約です。"
     assert result.detail_ja == ["点 1", "点 2"]
+    assert result.unsupported_details == 0
     [record] = articles_in(requests[0])
     assert record["title"] == "New model"
     assert record["published_at"] == "2026-11-04T01:00:00+00:00"
@@ -151,8 +162,86 @@ def test_summarize_returns_the_japanese_summary() -> None:
     assert "summary_ja と同じ内容は繰り返しません" in requests[0]["system"]
     assert "空の配列" in requests[0]["system"]
     assert requests[0]["output_config"]["effort"] == "medium"
-    assert "title_ja" in requests[0]["output_config"]["format"]["schema"]["required"]
+    # 詳細は根拠の一文 (evidence) と一緒に返させる (#21)。
+    assert "evidence" in requests[0]["system"]
+    schema = requests[0]["output_config"]["format"]["schema"]
+    assert "details" in schema["required"]
     assert requests[0]["output_config"]["format"]["type"] == "json_schema"
+
+
+def test_summarize_drops_details_whose_evidence_is_not_in_the_body(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    body = "The price is $2 per million tokens.\n\nOld models retire\non January 1."
+    summary = {
+        "title_ja": "t",
+        "summary_ja": "s",
+        "details": [
+            {"text_ja": "料金は 2 ドル。", "evidence": "The price is $2 per million tokens."},
+            # 改行や空白の違いだけなら、本文にあるとみなす。
+            {
+                "text_ja": "旧モデルは 1 月 1 日に終了。",
+                "evidence": "Old models  retire on January 1.",
+            },
+            {"text_ja": "本文にない点。", "evidence": "Prices double next year."},
+            {"text_ja": "根拠のない点。", "evidence": ""},
+        ],
+    }
+    llm, _ = summarizer(lambda _body: httpx2.Response(200, json=message(json.dumps(summary))))
+
+    with caplog.at_level(logging.WARNING, logger="ai_dev_digest.llm"):
+        result = llm.summarize(entry(url="https://example.com/a"), body)
+
+    assert result.detail_ja == ["料金は 2 ドル。", "旧モデルは 1 月 1 日に終了。"]
+    assert result.unsupported_details == 2
+    assert (
+        "dropping a detail of https://example.com/a without evidence in the body: 本文にない点。"
+        in caplog.text
+    )
+    assert "根拠のない点。" in caplog.text
+
+
+def test_summarize_checks_evidence_against_the_body_it_sent() -> None:
+    # 上限で切った後の本文にしかない一文は、根拠にならない。
+    body = "x" * SUMMARY_INPUT_CHARS + " Only after the limit."
+    summary = {
+        "title_ja": "t",
+        "summary_ja": "s",
+        "details": [{"text_ja": "切られた後の点。", "evidence": "Only after the limit."}],
+    }
+    llm, _ = summarizer(lambda _body: httpx2.Response(200, json=message(json.dumps(summary))))
+
+    result = llm.summarize(entry(), body)
+
+    assert result.detail_ja == []
+    assert result.unsupported_details == 1
+
+
+@pytest.mark.parametrize(
+    ("evidence", "body", "expected"),
+    [
+        ("Old models retire on January 1.", "Old models retire\non January 1.", True),
+        ("  Old models  retire ", "Old models retire on January 1.", True),
+        ("Old models retire on January 2.", "Old models retire on January 1.", False),
+        ("", "Old models retire on January 1.", False),
+        ("   ", "Old models retire on January 1.", False),
+        # 大文字と小文字、引用符の違いはそろえない。
+        ("old models retire", "Old models retire on January 1.", False),
+        ("it's", "it\u2019s new", False),
+    ],
+)
+def test_supported_allows_only_whitespace_differences(
+    evidence: str, body: str, expected: bool
+) -> None:
+    assert supported(evidence, body) is expected
+
+
+def test_an_empty_title_becomes_an_llm_error() -> None:
+    summary = {"title_ja": " ", "summary_ja": "s", "details": []}
+    llm, _ = summarizer(lambda _body: httpx2.Response(200, json=message(json.dumps(summary))))
+
+    with pytest.raises(LLMError, match="expected shape"):
+        llm.summarize(entry(), "body")
 
 
 def test_api_errors_become_llm_errors() -> None:
