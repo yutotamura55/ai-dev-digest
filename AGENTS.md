@@ -42,7 +42,7 @@ Never push directly to the default branch, enable auto-merge, enqueue a pull req
 
 ## Checks before committing
 
-- Run `scripts/check.sh` in the dev container before each commit, and commit only when it passes. README "開発" shows how. It runs every check that CI runs: Ruff (format, lint, security rules), mypy strict, vulture, pytest with coverage against the Firestore emulator, pip-audit, Prettier, ESLint, `tsc --noEmit`, Knip, Vitest with coverage, npm audit, hadolint, ShellCheck, actionlint, zizmor, Semgrep CE, and diff-cover for the lines changed since `origin/main`.
+- Run `scripts/check.sh` in the dev container before each commit, and commit only when it passes. README "開発" shows how. It runs every check that CI runs: Ruff (format, lint, security rules), mypy strict, vulture, pytest with coverage against the Firestore emulator, pip-audit, Prettier, ESLint, `tsc --noEmit`, Knip, Vitest with coverage, npm audit, `terraform fmt`, `terraform validate`, tflint, hadolint (the development and production Dockerfiles), ShellCheck, actionlint, zizmor, Semgrep CE (including its Terraform rules), and diff-cover for the lines changed since `origin/main`.
 - Do not silence a failure with a suppression comment or by relaxing the configuration. When an exception is unavoidable, explain it in a code comment and in the pull request.
 - When tests raise coverage, raise the floor (`fail_under` in `backend/pyproject.toml`, `thresholds` in `frontend/vitest.config.mts`) to the new measured value; never lower it to make a change pass.
 

@@ -11,14 +11,14 @@ variable "region" {
 
 variable "llm_model" {
   type        = string
-  description = "収集のジョブが選別と要約に使う Claude のモデル。"
-  default     = "claude-sonnet-5-5"
+  description = "収集のジョブが選別と要約に使う Claude のモデル。null ならコードの既定値 (backend の llm.DEFAULT_MODEL) を使う。"
+  default     = null
 }
 
 variable "max_articles_per_day" {
   type        = number
-  description = "1 日 (日本時間) に保存する記事の上限。"
-  default     = 10
+  description = "1 日 (日本時間) に保存する記事の上限。null ならコードの既定値 (backend の job.DEFAULT_LIMIT) を使う。"
+  default     = null
 }
 
 variable "collect_schedule" {

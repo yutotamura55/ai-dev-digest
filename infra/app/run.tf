@@ -5,6 +5,13 @@
 locals {
   placeholder_service_image = "us-docker.pkg.dev/cloudrun/container/hello"
   placeholder_job_image     = "us-docker.pkg.dev/cloudrun/container/job"
+
+  collect_overrides = {
+    for name, value in {
+      LLM_MODEL            = var.llm_model
+      MAX_ARTICLES_PER_DAY = var.max_articles_per_day == null ? null : tostring(var.max_articles_per_day)
+    } : name => value if value != null
+  }
 }
 
 module "api" {
@@ -54,13 +61,13 @@ resource "google_cloud_run_v2_job" "collect" {
           }
         }
 
-        env {
-          name  = "LLM_MODEL"
-          value = var.llm_model
-        }
-        env {
-          name  = "MAX_ARTICLES_PER_DAY"
-          value = tostring(var.max_articles_per_day)
+        # 指定した値だけを渡す。渡さない値は、イメージのコードの既定値になる。
+        dynamic "env" {
+          for_each = local.collect_overrides
+          content {
+            name  = env.key
+            value = env.value
+          }
         }
         env {
           name = "ANTHROPIC_API_KEY"

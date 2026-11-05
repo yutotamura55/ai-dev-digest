@@ -11,7 +11,8 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  # PR では古い実行を止める。main では、デプロイを途中で止めないよう、止めずに順に実行する。
+  # PR では古い実行を止める。main では、実行中のデプロイを途中で止めない。
+  # main の実行が続いたときは、待っている実行のうち最新の 1 つだけが残り、ほかは取り消される。
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -59,6 +60,7 @@ jobs:
       && github.event.pull_request.head.repo.full_name == github.repository
       && github.event.pull_request.user.login != 'dependabot[bot]'
       && vars.GCP_PROJECT_ID != ''
+      && vars.GCP_PROJECT_NUMBER != ''
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -99,23 +101,40 @@ jobs:
       github.event_name != 'pull_request'
       && github.ref == 'refs/heads/main'
       && vars.GCP_PROJECT_ID != ''
+      && vars.GCP_PROJECT_NUMBER != ''
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
       id-token: write # GCP の Workload Identity Federation に渡す OIDC のトークンを受け取る
-    concurrency:
-      group: deploy
-      cancel-in-progress: false
     env:
       CLOUDSDK_CORE_DISABLE_PROMPTS: "1"
-      IMAGE_REPOSITORY: asia-northeast1-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/ai-dev-digest
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
       IMAGE_TAG: ${{ github.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # main ブランチの workflow だけがなれる deployer になる (infra/bootstrap/github.tf)。
+      # 新しいイメージが要るインフラ (環境変数、権限など) を先に apply してあるかを確かめる。
+      # 未適用の変更があれば、デプロイせずに止まる。apply の後に main で CI を手動で実行し直す。
+      - id: plan-auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+          workload_identity_provider: projects/${{ vars.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/github/providers/ai-dev-digest
+          service_account: github-planner@${{ vars.GCP_PROJECT_ID }}.iam.gserviceaccount.com
+      - name: Build the dev container
+        run: |
+          HOST_UID="$(id -u)" HOST_GID="$(id -g)" docker compose build dev
+      - name: Check that infra/app has no unapplied changes
+        env:
+          CREDENTIALS_FILE: ${{ steps.plan-auth.outputs.credentials_file_path }}
+        run: |
+          HOST_UID="$(id -u)" HOST_GID="$(id -g)" docker compose run --rm --no-deps \
+            -e GCP_PROJECT_ID \
+            -e GOOGLE_APPLICATION_CREDENTIALS="/work/$(basename "$CREDENTIALS_FILE")" \
+            dev scripts/terraform.sh app check-ci
+      # main の ci.yml の実行だけがなれる deployer に切り替える (infra/bootstrap/github.tf)。
       - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
           project_id: ${{ vars.GCP_PROJECT_ID }}
@@ -125,6 +144,10 @@ jobs:
         with:
           # compose.yaml の gcloud と Firestore エミュレーターと同じ版。
           version: "592.0.0"
+      - name: Set the image repository
+        # infra/app の Artifact Registry のリポジトリ (registry.tf) と同じ場所。
+        run: |
+          echo "IMAGE_REPOSITORY=${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/ai-dev-digest" >> "$GITHUB_ENV"
       - name: Build and push the production images
         run: |
           gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev"

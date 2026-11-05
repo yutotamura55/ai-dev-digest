@@ -5,6 +5,7 @@
 #   docker compose run --rm infra app plan          infra/app も同じ
 #   docker compose run --rm infra app apply
 #   scripts/terraform.sh app plan-ci                CI で計画を表示する。state のロックを取らない
+#   scripts/terraform.sh app check-ci               CI のデプロイの前に、未適用の変更がないことを確かめる
 # 必要な環境変数:
 #   GCP_PROJECT_ID         プロジェクト ID。state のバケットは <プロジェクト ID>-tfstate
 #   GCP_BILLING_ACCOUNT    請求先アカウントの ID (bootstrap だけ)
@@ -13,14 +14,14 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 usage() {
-  echo "usage: scripts/terraform.sh <bootstrap|app> <plan|apply|plan-ci>" >&2
+  echo "usage: scripts/terraform.sh <bootstrap|app> <plan|apply|plan-ci|check-ci>" >&2
   exit 2
 }
 [[ $# -eq 2 ]] || usage
 stack="$1"
 action="$2"
 case "$stack" in bootstrap | app) ;; *) usage ;; esac
-case "$action" in plan | apply | plan-ci) ;; *) usage ;; esac
+case "$action" in plan | apply | plan-ci | check-ci) ;; *) usage ;; esac
 
 : "${GCP_PROJECT_ID:?set GCP_PROJECT_ID to the GCP project ID}"
 export TF_VAR_project_id="$GCP_PROJECT_ID"
@@ -51,5 +52,15 @@ case "$action" in
     ;;
   plan-ci)
     terraform -chdir="$dir" plan -input=false -lock=false
+    ;;
+  check-ci)
+    # -detailed-exitcode の終了コードは、0 が変更なし、1 がエラー、2 が変更あり。
+    status=0
+    terraform -chdir="$dir" plan -input=false -lock=false -detailed-exitcode || status=$?
+    if [[ "$status" -eq 2 ]]; then
+      echo "infra/$stack has changes that are not applied yet. Apply them first (README), then run CI on main again." >&2
+      exit 1
+    fi
+    exit "$status"
     ;;
 esac

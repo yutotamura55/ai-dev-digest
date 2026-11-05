@@ -125,7 +125,7 @@ API は `GET /articles?date=YYYY-MM-DD` で、指定した日本時間の日付�
 | Checks | PR と `main` への push | 開発用のコンテナで `scripts/check.sh` を実行する |
 | Build images | PR | 本番用のイメージ（`backend/`、`frontend/`）を作れるか確かめる。push はしない |
 | Terraform plan | このリポジトリのブランチから出た PR | `infra/app` の `terraform plan` を出す。GCP は読むだけ |
-| Deploy | `main` への push と、`main` での手動の実行 | 本番用のイメージを作って push し、Cloud Run のサービスとジョブのイメージを更新する |
+| Deploy | `main` への push と、`main` での手動の実行 | `infra/app` に未適用の変更がないことを確かめてから、本番用のイメージを作って push し、Cloud Run のサービスとジョブのイメージを更新する |
 
 Terraform plan と Deploy は、リポジトリ変数 `GCP_PROJECT_ID` と `GCP_PROJECT_NUMBER` があるときだけ動きます。
 GCP に構築する前は、この 2 つのジョブは飛ばされます。
@@ -229,6 +229,8 @@ gcloud と Terraform はコンテナで動かすので、ホストに入れる�
 
    この時点の画面と API は、Google の見本のページを返します。
    アプリのイメージは、次の手順のデプロイで入ります。
+   初回の `apply` は、付けたばかりの権限が GCP に反映される前にジョブを作ろうとして、シークレットを読めないというエラーで止まることがあります。
+   そのときは、数分待ってから `plan` と `apply` をもう一度実行します。
 
 7. GitHub のリポジトリ変数に、プロジェクト ID と、手順 4 で控えたプロジェクト番号を設定します。
 
@@ -256,6 +258,13 @@ gcloud と Terraform はコンテナで動かすので、ホストに入れる�
    git switch main && git pull
    docker compose run --rm infra app plan
    docker compose run --rm infra app apply
+   ```
+
+3. マージで動いた Deploy のジョブは、`infra/app` に未適用の変更があるため、デプロイせずに失敗しています。
+   apply の後に、`main` で CI を手動で実行してデプロイします。
+
+   ```bash
+   gh workflow run ci.yml --ref main
    ```
 
 `infra/bootstrap` の変更は CI では計画を出しません。

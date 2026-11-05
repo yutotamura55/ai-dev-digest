@@ -23,7 +23,8 @@ resource "google_iam_workload_identity_pool_provider" "github" {
   attribute_mapping = {
     "google.subject"       = "assertion.sub"
     "attribute.repository" = "assertion.repository"
-    "attribute.ref"        = "assertion.ref"
+    # 動いている workflow のファイルとブランチ (<所有者>/<名前>/.github/workflows/ci.yml@refs/heads/main)。
+    "attribute.workflow_ref" = "assertion.workflow_ref"
   }
 
   oidc {
@@ -54,11 +55,12 @@ resource "google_service_account_iam_member" "planner_from_github" {
   member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repository/${var.github_repository}"
 }
 
-# deployer には、main ブランチで動く workflow からだけなれる。PR の workflow (refs/pull/...) はなれない。
+# deployer には、main ブランチで動く ci.yml の実行 (push と手動の実行) からだけなれる。
+# PR の実行 (ci.yml@refs/pull/...) や、ほかの workflow のファイルからはなれない。
 resource "google_service_account_iam_member" "deployer_from_github" {
   service_account_id = google_service_account.deployer.name
   role               = "roles/iam.workloadIdentityUser"
-  member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.ref/refs/heads/main"
+  member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.workflow_ref/${var.github_repository}/.github/workflows/ci.yml@refs/heads/main"
 }
 
 resource "google_project_iam_member" "planner_viewer" {
