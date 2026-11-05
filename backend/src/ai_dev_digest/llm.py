@@ -27,9 +27,6 @@ JUDGE_EXCERPT_CHARS = 300
 # 要約に渡す本文の文字数の上限 (およそ 4,000 トークン)。
 SUMMARY_INPUT_CHARS = 12_000
 MAX_OUTPUT_TOKENS = 4_000
-# 根拠の一文の最小の長さ (空白を整えた後の文字数)。"the" やモデル名だけの短い語はどの本文にも
-# あり根拠にならないので除き、"The API is free." のような短い一文は通す。
-MIN_EVIDENCE_CHARS = 12
 
 # 記事の題名や本文は外部のサイトから取得したデータで、指示を含んでいることがある。
 # 指示 (system) と記事のデータを分け、データの中の指示に従わないことを両方の指示に書く。
@@ -100,13 +97,16 @@ class SummaryResponse(BaseModel):
 
 
 def supported(evidence: str, body: str) -> bool:
-    """evidence が本文の書き写しか。空白の連続の違いだけを許し、短すぎれば根拠なしとする。
+    """evidence が本文の書き写しか。空白の連続の違いだけを許し、空なら根拠なしとする。
 
-    LLM が本文にない内容を詳細に書くのを、追加の呼び出しなしで機械的に防ぐ (#21)。
-    引用符やダッシュの違いはそろえない。実際の不一致を見てから決める。
+    確かめるのは「引用が本文にある」ことだけで、引用と項目の内容が対応するかは確かめない
+    (LLM による整合の判定は #21 の範囲外)。引用の長さや文の形の条件は付けない。
+    文字数では "It is free." のような短い一文と "Claude Sonnet" のような語句を区別できず、
+    下限を置くと正しい項目を落とす。引用符やダッシュの違いはそろえない。
+    実際の不一致を見てから決める。
     """
     quote = collapse_whitespace(evidence)
-    return len(quote) >= MIN_EVIDENCE_CHARS and quote in collapse_whitespace(body)
+    return bool(quote) and quote in collapse_whitespace(body)
 
 
 class Summarizer(Protocol):

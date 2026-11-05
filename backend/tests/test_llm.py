@@ -184,8 +184,8 @@ def test_summarize_drops_details_whose_evidence_is_not_in_the_body(
                 "evidence": "Old models  retire on January 1.",
             },
             {"text_ja": "本文にない点。", "evidence": "Prices double next year."},
-            # 本文にはあるが短すぎる引用は、根拠にしない。
-            {"text_ja": "短い根拠の点。", "evidence": "January 1."},
+            # 短い引用も、本文にあれば通す (長さでは一文と語句を区別できない)。
+            {"text_ja": "短い引用の点。", "evidence": "January 1."},
             {"text_ja": "根拠の\nない点。", "evidence": ""},
         ],
     }
@@ -194,13 +194,12 @@ def test_summarize_drops_details_whose_evidence_is_not_in_the_body(
     with caplog.at_level(logging.WARNING, logger="ai_dev_digest.llm"):
         result = llm.summarize(entry(url="https://example.com/a"), body)
 
-    assert result.detail_ja == ["料金は 2 ドル。", "旧モデルは 1 月 1 日に終了。"]
-    assert result.unsupported_details == 3
+    assert result.detail_ja == ["料金は 2 ドル。", "旧モデルは 1 月 1 日に終了。", "短い引用の点。"]
+    assert result.unsupported_details == 2
     assert (
         "dropping a detail of https://example.com/a without evidence in the body: "
         "本文にない点。 (evidence: Prices double next year.)"
     ) in caplog.text
-    assert "短い根拠の点。 (evidence: January 1.)" in caplog.text
     # ログの行が分かれないよう、応答の改行は空白にする。
     assert "根拠の ない点。 (evidence: )" in caplog.text
 
@@ -229,9 +228,9 @@ def test_summarize_checks_evidence_against_the_body_it_sent() -> None:
         ("Old models retire on January 2.", "Old models retire on January 1.", False),
         ("", "Old models retire on January 1.", False),
         ("   ", "Old models retire on January 1.", False),
-        # 短い一文は通し、本文にあっても語だけの短い引用は根拠にしない。
-        ("The API is free.", "The API is free. Old models retire on January 1.", True),
-        ("January 1.", "Old models retire on January 1.", False),
+        # 短い一文も語句も、本文にあれば通す (長さの条件は付けない)。
+        ("It is free.", "It is free. Old models retire on January 1.", True),
+        ("Claude Sonnet", "Claude Sonnet retires on January 1.", True),
         # 大文字と小文字、引用符の違いはそろえない。
         ("old models retire on january 1.", "Old models retire on January 1.", False),
         ("it's a new model today.", "it\u2019s a new model today.", False),
