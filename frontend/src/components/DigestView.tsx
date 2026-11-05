@@ -21,6 +21,11 @@ export function DigestView({ digest }: { digest: DayDigest }) {
           <Link href={`/days/${shiftDate(digest.date, 1)}`}>次の日 →</Link>
         )}
       </nav>
+      {/* 題名の訳・要約・詳細は LLM の生成なので、値は原文で確かめるよう促す (#20)。記事がない日にも出す。 */}
+      <p className="notice" role="note">
+        題名の訳、要約、詳細は
+        LLM（Claude）が生成したものです。モデル名・料金・期日は原文で確かめてください。
+      </p>
       {digest.articles.length === 0 ? (
         <p>この日の記事はまだありません。</p>
       ) : (
