@@ -7,8 +7,8 @@ dependencies = []
 
 [dependency-groups]
 dev = [
-    "diff-cover>=11.0.1",
-    "semgrep>=1.183.0",
+    "diff-cover>=11.0.2",
+    "semgrep>=1.185.0",
     "zizmor>=1.32.0",
 ]
 
