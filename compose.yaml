@@ -19,7 +19,7 @@ x-dev: &dev
 
 services:
   firestore:
-    image: gcr.io/google.com/cloudsdktool/google-cloud-cli:592.0.0-emulators@sha256:c3b114528245d315af73d92d95d8e2fed9747ce29003ad46232f22b4542da036
+    image: gcr.io/google.com/cloudsdktool/google-cloud-cli:594.0.1-emulators@sha256:17b4e7f940db19984c051a321c32f57bf679cb7148835fd16ddc7ce2908a70d8
     command: gcloud emulators firestore start --host-port=0.0.0.0:8080
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/"]
