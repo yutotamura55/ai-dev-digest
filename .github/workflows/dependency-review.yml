@@ -17,7 +17,7 @@ jobs:
     timeout-minutes: 10
     steps:
       # PR で加わる依存に既知の脆弱性があれば失敗にする。
-      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+      - uses: actions/dependency-review-action@bbc44d14a204704ccc493733616cd1e93a0321ec # v5.0.1
         with:
           # Semgrep 1.183.0 が固定している mcp と opentelemetry-api の 5 件だけを許す。
           # scripts/check.sh の pip-audit の除外と同じもので、理由もそこに書いてある (#1)。
